@@ -1,0 +1,105 @@
+:root {
+  --bg-1: #0f1e26;
+  --bg-2: #22343b;
+  --card: rgba(14, 18, 20, 0.72);
+  --text: #f8f8f8;
+  --muted: #cfd2d6;
+  --accent: #d54e2a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 15% 20%, #355868 0%, var(--bg-1) 45%, #081116 100%);
+}
+
+#root {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  min-height: 100vh;
+  padding: 10px;
+}
+
+.app-shell {
+  width: min(100%, 350px);
+  min-height: 700px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(29, 39, 44, 0.9), rgba(10, 13, 16, 0.95));
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.app-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.score-card {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.score-card strong {
+  font-size: 26px;
+  color: #ffd08a;
+}
+
+.canvas-wrap {
+  align-self: center;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+canvas {
+  width: min(100%, 290px);
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.controls-grid {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.control-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 12px 8px;
+  color: var(--text);
+  background: linear-gradient(180deg, #df5b35, #a43417);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.control-btn:active {
+  transform: translateY(1px);
+}
+
+@media (max-width: 380px) {
+  .app-shell {
+    min-height: 650px;
+  }
+}
+

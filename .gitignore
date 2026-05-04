@@ -1,0 +1,41 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node/Web
+node_modules/
+webapp/node_modules/
+webapp/dist/
+webapp/.vite/
+
+# IDE/System
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Build/package
+dist/
+build/
+*.spec
+
+# Local app data
+local_settings.json
+session.json
+pending_scores.json
+cache/
+logs/
+
