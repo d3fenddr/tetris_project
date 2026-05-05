@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import parse_qsl, urlsplit
+
 from sqlalchemy import create_engine
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -7,11 +9,51 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from backend.app.config import settings
 
 
-connect_args = {}
-if settings.database_url.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
+def _is_sqlite_url(database_url: str) -> bool:
+    return database_url.startswith("sqlite")
 
-engine = create_engine(settings.database_url, connect_args=connect_args, future=True)
+
+def _is_postgres_url(database_url: str) -> bool:
+    return database_url.startswith(("postgresql://", "postgresql+psycopg2://", "postgres://"))
+
+
+def _normalized_database_url(database_url: str) -> str:
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql://", 1)
+    return database_url
+
+
+def _postgres_connect_args(database_url: str) -> dict:
+    parsed = urlsplit(database_url)
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    if any(key.lower() == "sslmode" for key, _value in query_pairs):
+        return {}
+    return {"sslmode": "require"}
+
+
+def _engine_kwargs(database_url: str) -> tuple[str, dict]:
+    kwargs: dict = {"future": True}
+    if _is_sqlite_url(database_url):
+        kwargs["connect_args"] = {"check_same_thread": False}
+        return database_url, kwargs
+
+    if _is_postgres_url(database_url):
+        kwargs.update(
+            {
+                "pool_pre_ping": True,
+                "pool_recycle": 300,
+                "pool_size": 5,
+                "max_overflow": 10,
+            }
+        )
+        kwargs["connect_args"] = _postgres_connect_args(database_url)
+        return _normalized_database_url(database_url), kwargs
+
+    return database_url, kwargs
+
+
+database_url, engine_kwargs = _engine_kwargs(settings.database_url)
+engine = create_engine(database_url, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 Base = declarative_base()
 

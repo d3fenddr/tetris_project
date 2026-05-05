@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -116,41 +117,51 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenPairResp
 @router.post("/enter", response_model=EnterResponse)
 def enter(payload: EnterRequest, db: Session = Depends(get_db)) -> EnterResponse:
     try:
-        clean_nickname = validate_nickname_format(payload.nickname)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-    normalized = normalize_nickname(clean_nickname)
-    user = db.query(User).filter(User.normalized_nickname == normalized).first()
-    created = False
-
-    if user:
-        if not verify_password(payload.password, user.password_hash):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
-    else:
         try:
-            nickname, normalized = validate_available_nickname(db, clean_nickname)
+            clean_nickname = validate_nickname_format(payload.nickname)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-        user = User(
-            nickname=nickname,
-            normalized_nickname=normalized,
-            password_hash=hash_password(payload.password),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        created = True
 
-    tokens = _token_pair_for_user(db, user)
-    db.refresh(user)
-    return EnterResponse(
-        access_token=tokens.access_token,
-        refresh_token=tokens.refresh_token,
-        created=created,
-        user=_user_response(db, user),
-    )
+        normalized = normalize_nickname(clean_nickname)
+        user = db.query(User).filter(User.normalized_nickname == normalized).first()
+        created = False
+
+        if user:
+            if not verify_password(payload.password, user.password_hash):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
+        else:
+            try:
+                nickname, normalized = validate_available_nickname(db, clean_nickname)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+            user = User(
+                nickname=nickname,
+                normalized_nickname=normalized,
+                password_hash=hash_password(payload.password),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            created = True
+
+        tokens = _token_pair_for_user(db, user)
+        db.refresh(user)
+        return EnterResponse(
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            created=created,
+            user=_user_response(db, user),
+        )
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(f"Database temporarily unavailable during auth enter: {exc.__class__.__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is temporarily unavailable. Please try again.",
+        )
 
 
 @router.post("/logout")
