@@ -295,15 +295,19 @@ def main_game(
         submit_queue: "queue.Queue[str]" = queue.Queue()
 
         def submit_worker() -> None:
-            submitted = score_service.record_score(
-                state.player_name,
-                score,
-                mode=state.game_mode,
-                lines=total_lines,
-                level=1,
-            )
-            message = "Season 2 score submitted." if submitted else "Score not submitted. Check backend."
-            submit_queue.put(message)
+            try:
+                result = score_service.record_score_result(
+                    state.player_name,
+                    score,
+                    mode=state.game_mode,
+                    lines=total_lines,
+                    level=1,
+                )
+                submit_queue.put(result.message)
+            except Exception as exc:
+                message = f"Score was not submitted: {exc.__class__.__name__}"
+                print(f"[score-flow] Background submission failed: {exc.__class__.__name__}")
+                submit_queue.put(message)
 
         threading.Thread(target=submit_worker, daemon=True).start()
         if not game_over_screen(screen, clock, score, "Submitting Season 2 score...", submit_queue):

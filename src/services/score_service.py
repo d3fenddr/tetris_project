@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-from src.config import CURRENT_SEASON
+from src.config import CURRENT_SEASON, DEBUG_ONLINE_SCORE_FLOW
 from src.services.backend_client import BackendClient, BackendClientError
 from src.services.google_sheet_service import GoogleSheetError, GoogleSheetService
 from src.services.session_service import SessionService
 from src.utils.date_utils import current_sheet_datetime
+
+
+@dataclass
+class ScoreSubmissionResult:
+    submitted: bool
+    message: str
+    score_id: int | None = None
+    error: str = ""
 
 
 class ScoreService:
@@ -34,9 +43,32 @@ class ScoreService:
         self.backend_client.set_access_token(token)
 
     def record_score(self, player_name: str, score: int, mode: str = "normal", lines: int = 0, level: int = 1) -> bool:
+        return self.record_score_result(player_name, score, mode=mode, lines=lines, level=level).submitted
+
+    def record_score_result(
+        self,
+        player_name: str,
+        score: int,
+        mode: str = "normal",
+        lines: int = 0,
+        level: int = 1,
+    ) -> ScoreSubmissionResult:
         clean_name = player_name.strip()
         if not clean_name or score < 0:
-            return False
+            message = "Score was not submitted: missing player name or invalid score."
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print(f"[score-flow] {message} name_present={bool(clean_name)} score={score}")
+            return ScoreSubmissionResult(False, message, error=message)
+
+        if DEBUG_ONLINE_SCORE_FLOW:
+            raw_account = self.session_service.load().get("account")
+            user_id = raw_account.get("user_id") if isinstance(raw_account, dict) else None
+            username = raw_account.get("username") if isinstance(raw_account, dict) else ""
+            print(
+                "[score-flow] Recording game over score: "
+                f"player={clean_name}, account={username or 'missing'}, user_id={user_id}, "
+                f"score={score}, mode={mode}, lines={lines}, level={level}"
+            )
 
         local_entry = {
             "name": clean_name,
@@ -50,10 +82,18 @@ class ScoreService:
 
         try:
             self._require_backend_auth()
-            self.backend_client.submit_score(score=score, mode=mode, lines=lines, level=level)
-            return True
-        except BackendClientError:
-            return False
+            result = self.backend_client.submit_score(score=score, mode=mode, lines=lines, level=level)
+            score_id = int(result["id"]) if isinstance(result, dict) and result.get("id") is not None else None
+            message = "Score submitted to Season 2."
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print(f"[score-flow] {message} score_id={score_id}")
+            return ScoreSubmissionResult(True, message, score_id=score_id)
+        except BackendClientError as exc:
+            error = str(exc)
+            message = f"Score was not submitted: {error}"
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print(f"[score-flow] {message}")
+            return ScoreSubmissionResult(False, message, error=error)
 
     def get_player_history(self, player_name: str = "") -> List[Dict[str, Any]]:
         try:

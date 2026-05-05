@@ -6,11 +6,13 @@ from uuid import uuid4
 
 import requests
 
-from src.config import CURRENT_SEASON, NETWORK_TIMEOUT_SECONDS, TETRIS_BACKEND_URL
+from src.config import CURRENT_SEASON, DEBUG_ONLINE_SCORE_FLOW, NETWORK_TIMEOUT_SECONDS, TETRIS_BACKEND_URL
 
 
 class BackendClientError(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass
@@ -31,6 +33,8 @@ class BackendClient:
         self.timeout_seconds = timeout_seconds
         self.session = requests.Session()
         self.access_token: Optional[str] = None
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(f"[score-flow] Backend URL: {self.base_url}")
 
     def set_access_token(self, access_token: Optional[str]) -> None:
         self.access_token = access_token or None
@@ -41,6 +45,9 @@ class BackendClient:
         return {"Authorization": f"Bearer {self.access_token}"}
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        should_log = DEBUG_ONLINE_SCORE_FLOW and (
+            path.startswith("/scores") or path.startswith("/auth/me")
+        )
         try:
             response = self.session.request(
                 method=method,
@@ -50,14 +57,22 @@ class BackendClient:
                 **kwargs,
             )
         except requests.RequestException as exc:
+            if should_log:
+                print(f"[score-flow] {method} {path} failed: backend unavailable")
             raise BackendClientError("Online backend is unavailable.") from exc
+
+        if should_log:
+            print(f"[score-flow] {method} {path} -> HTTP {response.status_code}")
 
         if response.status_code >= 400:
             try:
                 detail = response.json().get("detail")
             except ValueError:
                 detail = response.text
-            raise BackendClientError(str(detail or "Backend request failed."))
+            message = str(detail or "Backend request failed.")
+            if should_log:
+                print(f"[score-flow] {method} {path} error: {message[:160]}")
+            raise BackendClientError(message, status_code=response.status_code)
 
         if response.status_code == 204:
             return None
@@ -103,19 +118,27 @@ class BackendClient:
         level: int = 1,
         season: int = CURRENT_SEASON,
     ) -> Dict[str, Any]:
-        return self._request(
+        payload = {
+            "score": score,
+            "mode": mode,
+            "lines": lines,
+            "level": level,
+            "season": season,
+            "platform": "desktop",
+            "client_game_id": str(uuid4()),
+        }
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(f"[score-flow] Submit payload: {payload}")
+            print(f"[score-flow] Auth token present: {bool(self.access_token)}")
+        result = self._request(
             "POST",
             "/scores",
-            json={
-                "score": score,
-                "mode": mode,
-                "lines": lines,
-                "level": level,
-                "season": season,
-                "platform": "desktop",
-                "client_game_id": str(uuid4()),
-            },
+            json=payload,
         )
+        if DEBUG_ONLINE_SCORE_FLOW:
+            score_id = result.get("id") if isinstance(result, dict) else None
+            print(f"[score-flow] Score submit succeeded: id={score_id}")
+        return result
 
     def get_leaderboard(
         self,
@@ -126,9 +149,17 @@ class BackendClient:
         query = f"/scores/leaderboard?season={season}&limit={limit}"
         if mode and mode != "all":
             query += f"&mode={mode}"
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(f"[score-flow] Fetch leaderboard: season={season}, mode={mode or 'all'}, limit={limit}")
         data = self._request("GET", query)
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(f"[score-flow] Leaderboard rows received: {len(data) if isinstance(data, list) else 0}")
         return data if isinstance(data, list) else []
 
     def get_my_history(self, season: int = CURRENT_SEASON, limit: int = 50) -> List[Dict[str, Any]]:
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(f"[score-flow] Fetch history: season={season}, limit={limit}")
         data = self._request("GET", f"/scores/history/me?season={season}&limit={limit}")
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(f"[score-flow] History rows received: {len(data) if isinstance(data, list) else 0}")
         return data if isinstance(data, list) else []

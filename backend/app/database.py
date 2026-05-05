@@ -58,20 +58,22 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, futu
 Base = declarative_base()
 
 
-def ensure_schema() -> None:
-    """Small compatibility sync for local SQLite databases without migrations."""
-    if not settings.database_url.startswith("sqlite"):
-        return
+def _column_type(sqlite_type: str, postgres_type: str) -> str:
+    return sqlite_type if _is_sqlite_url(settings.database_url) else postgres_type
 
+
+def ensure_schema() -> None:
+    """Small compatibility sync for existing databases without migrations."""
     inspector = inspect(engine)
     if "users" in inspector.get_table_names():
         user_columns = {column["name"] for column in inspector.get_columns("users")}
         user_additions = {
             "normalized_nickname": "ALTER TABLE users ADD COLUMN normalized_nickname VARCHAR(50)",
-            "updated_at": "ALTER TABLE users ADD COLUMN updated_at DATETIME",
-            "last_login_at": "ALTER TABLE users ADD COLUMN last_login_at DATETIME",
+            "updated_at": f"ALTER TABLE users ADD COLUMN updated_at {_column_type('DATETIME', 'TIMESTAMP')}",
+            "last_login_at": f"ALTER TABLE users ADD COLUMN last_login_at {_column_type('DATETIME', 'TIMESTAMP')}",
             "games_played": "ALTER TABLE users ADD COLUMN games_played INTEGER DEFAULT 0 NOT NULL",
             "best_score": "ALTER TABLE users ADD COLUMN best_score INTEGER DEFAULT 0 NOT NULL",
+            "telegram_user_id": f"ALTER TABLE users ADD COLUMN telegram_user_id {_column_type('BIGINT', 'BIGINT')}",
         }
         with engine.begin() as connection:
             for column_name, statement in user_additions.items():
@@ -83,11 +85,15 @@ def ensure_schema() -> None:
     if "scores" in inspector.get_table_names():
         score_columns = {column["name"] for column in inspector.get_columns("scores")}
         score_additions = {
+            "created_at": f"ALTER TABLE scores ADD COLUMN created_at {_column_type('DATETIME', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL')}",
             "nickname_at_submission": "ALTER TABLE scores ADD COLUMN nickname_at_submission VARCHAR(50)",
             "lines": "ALTER TABLE scores ADD COLUMN lines INTEGER DEFAULT 0 NOT NULL",
             "level": "ALTER TABLE scores ADD COLUMN level INTEGER DEFAULT 1 NOT NULL",
             "mode": "ALTER TABLE scores ADD COLUMN mode VARCHAR(30) DEFAULT 'normal' NOT NULL",
             "season": "ALTER TABLE scores ADD COLUMN season INTEGER DEFAULT 2 NOT NULL",
+            "platform": "ALTER TABLE scores ADD COLUMN platform VARCHAR(30) DEFAULT 'desktop' NOT NULL",
+            "telegram_chat_id": f"ALTER TABLE scores ADD COLUMN telegram_chat_id {_column_type('BIGINT', 'BIGINT')}",
+            "client_game_id": "ALTER TABLE scores ADD COLUMN client_game_id VARCHAR(64) DEFAULT 'legacy' NOT NULL",
         }
         with engine.begin() as connection:
             for column_name, statement in score_additions.items():

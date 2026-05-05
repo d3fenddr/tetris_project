@@ -14,6 +14,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.getenv("TETRIS_DATABASE_URL", "sqlite:///./tetris.db")
@@ -26,6 +33,7 @@ class Settings:
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_auth_max_age_seconds: int = _env_int("TELEGRAM_AUTH_MAX_AGE_SECONDS", 3600)
     app_version: str = os.getenv("TETRIS_APP_VERSION", "0.1.0")
+    debug_online_score_flow: bool = _env_bool("DEBUG_ONLINE_SCORE_FLOW", True)
 
 
 settings = Settings()

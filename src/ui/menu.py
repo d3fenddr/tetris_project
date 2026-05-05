@@ -54,7 +54,6 @@ def show_main_menu(
             screen.get_width() // 2,
             MENU_TOP_Y,
         )
-        draw_text(screen, "Desktop League", 18, MUTED_TEXT, screen.get_width() // 2, MENU_TOP_Y + 42)
 
         mouse_x, mouse_y = pygame.mouse.get_pos()
         button_rects: list[tuple[str, pygame.Rect]] = []

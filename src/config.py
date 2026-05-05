@@ -3,6 +3,14 @@ from __future__ import annotations
 import os
 from typing import List
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 APP_TITLE = "Tetris"
 
 WINDOW_WIDTH = 350
@@ -40,7 +48,7 @@ DEFAULT_VOLUME_PERCENT = 100
 DEFAULT_MUSIC_ENABLED = True
 MAX_PLAYER_NAME_LENGTH = 12
 BUTTON_DEBOUNCE_MS = 180
-TETRIS_BACKEND_URL = os.getenv("TETRIS_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+TETRIS_BACKEND_URL = os.getenv("TETRIS_BACKEND_URL", "https://tetris-project-ahgg.onrender.com").rstrip("/")
 CURRENT_SEASON = 2
 ARCHIVED_SEASON = 1
 
@@ -117,6 +125,7 @@ GOOGLE_FIELD_SCORE = "entry.1726351225"
 NETWORK_TIMEOUT_SECONDS = 3.5
 NETWORK_RETRIES = 2
 NETWORK_BACKOFF_SECONDS = 0.35
+DEBUG_ONLINE_SCORE_FLOW = _env_bool("DEBUG_ONLINE_SCORE_FLOW", True)
 
 SHEET_DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import desc
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -24,6 +24,12 @@ def create_score(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Score:
+    if settings.debug_online_score_flow:
+        print(
+            "[score-flow] Backend score submit received: "
+            f"user_id={current_user.id}, score={payload.score}, mode={payload.mode}, "
+            f"lines={payload.lines}, level={payload.level}, season={payload.season}"
+        )
     if payload.season != settings.current_season:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -51,12 +57,23 @@ def create_score(
     try:
         db.commit()
         db.refresh(score)
+        if settings.debug_online_score_flow:
+            print(f"[score-flow] Backend score saved: id={score.id}, user_id={current_user.id}")
         return score
     except IntegrityError:
         db.rollback()
+        if settings.debug_online_score_flow:
+            print(f"[score-flow] Backend duplicate score submission: user_id={current_user.id}")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Duplicate score submission for this game session.",
+        )
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(f"[score-flow] Backend score save failed: {exc.__class__.__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Score database is temporarily unavailable. Please try again.",
         )
 
 
@@ -67,6 +84,8 @@ def global_leaderboard(
     limit: int = Query(default=10, ge=1, le=100),
     mode: str | None = Query(default=None, min_length=1, max_length=30),
 ) -> list[LeaderboardItem]:
+    if settings.debug_online_score_flow:
+        print(f"[score-flow] Backend leaderboard fetch: season={season}, mode={mode or 'all'}, limit={limit}")
     query = db.query(Score).filter(Score.season == season)
     if mode and mode.lower() != "all":
         clean_mode = mode.lower()
@@ -74,7 +93,16 @@ def global_leaderboard(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid leaderboard mode.")
         query = query.filter(Score.mode == clean_mode)
 
-    rows = query.order_by(desc(Score.score), Score.created_at.asc()).limit(limit).all()
+    try:
+        rows = query.order_by(desc(Score.score), Score.created_at.asc()).limit(limit).all()
+    except SQLAlchemyError as exc:
+        print(f"[score-flow] Backend leaderboard fetch failed: {exc.__class__.__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Leaderboard database is temporarily unavailable. Please try again.",
+        )
+    if settings.debug_online_score_flow:
+        print(f"[score-flow] Backend leaderboard rows: {len(rows)}")
     return [
         LeaderboardItem(
             rank=idx,
@@ -95,13 +123,25 @@ def my_history(
     season: int = Query(default=settings.current_season, ge=1, le=99),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[Score]:
-    return (
-        db.query(Score)
-        .filter(Score.user_id == current_user.id, Score.season == season)
-        .order_by(Score.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    if settings.debug_online_score_flow:
+        print(f"[score-flow] Backend history fetch: user_id={current_user.id}, season={season}, limit={limit}")
+    try:
+        rows = (
+            db.query(Score)
+            .filter(Score.user_id == current_user.id, Score.season == season)
+            .order_by(Score.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+    except SQLAlchemyError as exc:
+        print(f"[score-flow] Backend history fetch failed: {exc.__class__.__name__}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="History database is temporarily unavailable. Please try again.",
+        )
+    if settings.debug_online_score_flow:
+        print(f"[score-flow] Backend history rows: {len(rows)}")
+    return rows
 
 
 @router.get("/telegram/group/{chat_id}", response_model=list[LeaderboardItem])
