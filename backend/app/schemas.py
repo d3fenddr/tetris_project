@@ -18,6 +18,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=6, max_length=128)
 
 
+class EnterRequest(BaseModel):
+    nickname: str = Field(min_length=3, max_length=20)
+    password: str = Field(min_length=6, max_length=128)
+
+
 class LogoutRequest(BaseModel):
     refresh_token: str = Field(min_length=16)
 
@@ -44,6 +49,11 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class EnterResponse(TokenPairResponse):
+    created: bool = False
+    user: UserResponse
 
 
 class NicknameChangeResponse(BaseModel):

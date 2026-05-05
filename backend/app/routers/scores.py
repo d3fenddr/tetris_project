@@ -65,14 +65,16 @@ def global_leaderboard(
     db: Session = Depends(get_db),
     season: int = Query(default=settings.current_season, ge=1, le=99),
     limit: int = Query(default=10, ge=1, le=100),
+    mode: str | None = Query(default=None, min_length=1, max_length=30),
 ) -> list[LeaderboardItem]:
-    rows = (
-        db.query(Score)
-        .filter(Score.season == season)
-        .order_by(desc(Score.score), Score.created_at.asc())
-        .limit(limit)
-        .all()
-    )
+    query = db.query(Score).filter(Score.season == season)
+    if mode and mode.lower() != "all":
+        clean_mode = mode.lower()
+        if clean_mode not in VALID_GAME_MODES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid leaderboard mode.")
+        query = query.filter(Score.mode == clean_mode)
+
+    rows = query.order_by(desc(Score.score), Score.created_at.asc()).limit(limit).all()
     return [
         LeaderboardItem(
             rank=idx,

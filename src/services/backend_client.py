@@ -17,6 +17,8 @@ class BackendClientError(RuntimeError):
 class BackendAuth:
     access_token: str
     refresh_token: str
+    created: bool = False
+    user: Optional[Dict[str, Any]] = None
 
 
 class BackendClient:
@@ -73,6 +75,17 @@ class BackendClient:
         self.set_access_token(auth.access_token)
         return auth
 
+    def authenticate_or_register(self, nickname: str, password: str) -> BackendAuth:
+        data = self._request("POST", "/auth/enter", json={"nickname": nickname, "password": password})
+        auth = BackendAuth(
+            access_token=str(data["access_token"]),
+            refresh_token=str(data["refresh_token"]),
+            created=bool(data.get("created", False)),
+            user=data.get("user") if isinstance(data.get("user"), dict) else None,
+        )
+        self.set_access_token(auth.access_token)
+        return auth
+
     def logout(self, refresh_token: str) -> None:
         self._request("POST", "/auth/logout", json={"refresh_token": refresh_token})
 
@@ -104,8 +117,16 @@ class BackendClient:
             },
         )
 
-    def get_leaderboard(self, season: int = CURRENT_SEASON, limit: int = 10) -> List[Dict[str, Any]]:
-        data = self._request("GET", f"/scores/leaderboard?season={season}&limit={limit}")
+    def get_leaderboard(
+        self,
+        season: int = CURRENT_SEASON,
+        limit: int = 10,
+        mode: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        query = f"/scores/leaderboard?season={season}&limit={limit}"
+        if mode and mode != "all":
+            query += f"&mode={mode}"
+        data = self._request("GET", query)
         return data if isinstance(data, list) else []
 
     def get_my_history(self, season: int = CURRENT_SEASON, limit: int = 50) -> List[Dict[str, Any]]:

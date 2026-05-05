@@ -62,9 +62,9 @@ class ScoreService:
         except BackendClientError:
             return self.session_service.get_local_history(player_name)
 
-    def get_leaderboard(self) -> List[Dict[str, Any]]:
+    def get_leaderboard(self, mode: str | None = None) -> List[Dict[str, Any]]:
         try:
-            return self.backend_client.get_leaderboard(season=CURRENT_SEASON, limit=10)
+            return self.backend_client.get_leaderboard(season=CURRENT_SEASON, limit=10, mode=mode)
         except BackendClientError as exc:
             raise RuntimeError("Online leaderboard is unavailable.") from exc
 

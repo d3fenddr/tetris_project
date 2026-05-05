@@ -6,12 +6,15 @@ from typing import Sequence
 
 import pygame
 
+from src.config import ACTIVE_PIECE_COLORS
+
 
 @dataclass
 class Piece:
     shape: list[list[int]]
     x: int
     y: int
+    color: tuple[int, int, int]
 
     @classmethod
     def spawn(
@@ -23,7 +26,8 @@ class Piece:
         idx = random.choices(range(len(shapes)), weights=weights, k=1)[0]
         shape = [row[:] for row in shapes[idx]]
         x = cols // 2 - len(shape[0]) // 2
-        return cls(shape=shape, x=x, y=0)
+        color = random.choice(ACTIVE_PIECE_COLORS)
+        return cls(shape=shape, x=x, y=0, color=color)
 
     def get_cells(self) -> list[tuple[int, int]]:
         return [
@@ -65,5 +69,5 @@ class Piece:
                         block_size,
                         block_size,
                     )
-                    pygame.draw.rect(screen, fill_color, rect)
+                    pygame.draw.rect(screen, self.color or fill_color, rect)
                     pygame.draw.rect(screen, border_color, rect, 1)

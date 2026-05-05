@@ -3,46 +3,31 @@ from __future__ import annotations
 import pygame
 
 from src.config import (
-    BLACK,
     BUTTON_DEBOUNCE_MS,
     FPS,
-    GRAY,
-    MAX_PLAYER_NAME_LENGTH,
+    MENU_BUTTON_FONT_SIZE,
+    MENU_BUTTON_GAP,
+    MENU_BUTTON_HEIGHT,
+    MENU_BUTTON_WIDTH,
+    MENU_PRIMARY_TEXT_COLOR,
+    MENU_SEASON_TITLE_FONT_SIZE,
+    MENU_TOP_Y,
+    MODE_CARD_GAP,
+    MODE_CARD_HEIGHT,
+    MODE_CARD_WIDTH,
+    MODE_DESCRIPTION_FONT_SIZE,
+    MODE_NAME_FONT_SIZE,
+    MODE_TITLE_FONT_SIZE,
+    MUTED_TEXT,
+    PANEL_BG,
+    PANEL_BORDER,
     RED,
     WHITE,
 )
 from src.config import GAME_MODE_ORDER
 from src.game.modes import game_mode_description, game_mode_label, next_game_mode
 from src.state import AppState
-from src.utils.ui_helpers import draw_text
-
-
-def ensure_player_name(
-    screen: pygame.Surface,
-    clock: pygame.time.Clock,
-    state: AppState,
-    first_page_img: pygame.Surface,
-) -> None:
-    entering = True
-    while entering:
-        screen.blit(first_page_img, (0, 0))
-        draw_text(screen, "Enter name:", 30, WHITE, screen.get_width() // 2, screen.get_height() // 3)
-        draw_text(screen, state.player_name or "_", 30, RED, screen.get_width() // 2, screen.get_height() // 2)
-        pygame.display.update()
-        clock.tick(FPS)
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                raise SystemExit
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN and state.player_name.strip():
-                    entering = False
-                elif event.key == pygame.K_BACKSPACE:
-                    state.player_name = state.player_name[:-1]
-                else:
-                    char = event.unicode
-                    if char.isalnum() and len(state.player_name) < MAX_PLAYER_NAME_LENGTH:
-                        state.player_name += char
+from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
 
 
 def show_main_menu(
@@ -51,35 +36,45 @@ def show_main_menu(
     state: AppState,
     background_img: pygame.Surface,
 ) -> str:
-    button_labels = ["Play", "Leaderboard", "Season 1 Top 3", "History", "Profile", "Settings", "Exit"]
-    font_size = 25
-    spacing = 52
-    total_height = len(button_labels) * spacing
-    start_y = screen.get_height() // 2 - total_height // 2 + 100
-
-    buttons = [
-        (label, font_size, screen.get_width() // 2, start_y + idx * spacing)
-        for idx, label in enumerate(button_labels)
-    ]
+    button_labels = ["Play", "Profile", "Leaderboard", "Season 1 Top 3", "History", "Settings", "Exit"]
+    start_y = 208
     last_click_ms = 0
+    selected_index = 0
 
     while True:
         screen.blit(background_img, (0, 0))
-        draw_text(screen, f"Hello, {state.player_name}", 28, WHITE, screen.get_width() // 2, screen.get_height() // 4)
-        account_label = state.account.username if state.account else "Guest"
-        draw_text(screen, f"Account: {account_label}", 16, GRAY, screen.get_width() // 2, screen.get_height() // 4 + 34)
-        draw_text(screen, f"Mode: {game_mode_label(state.game_mode)}", 16, GRAY, screen.get_width() // 2, screen.get_height() // 4 + 56)
+        overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+        overlay.fill((8, 10, 16, 132))
+        screen.blit(overlay, (0, 0))
+        draw_text_shadow(
+            screen,
+            "SEASON 2",
+            MENU_SEASON_TITLE_FONT_SIZE,
+            MENU_PRIMARY_TEXT_COLOR,
+            screen.get_width() // 2,
+            MENU_TOP_Y,
+        )
+        draw_text(screen, "Desktop League", 18, MUTED_TEXT, screen.get_width() // 2, MENU_TOP_Y + 42)
 
         mouse_x, mouse_y = pygame.mouse.get_pos()
         button_rects: list[tuple[str, pygame.Rect]] = []
-        for label, size, cx, cy in buttons:
-            font = pygame.font.SysFont("comicsans", size)
-            text_width, text_height = font.size(label)
-            hovered = abs(mouse_x - cx) < text_width // 2 and abs(mouse_y - cy) < text_height // 2
-            color = RED if hovered else WHITE
-            text_surface = font.render(label, True, color)
-            rect = text_surface.get_rect(center=(cx, cy))
-            screen.blit(text_surface, rect)
+        for idx, label in enumerate(button_labels):
+            rect = pygame.Rect(0, 0, MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT)
+            rect.center = (
+                screen.get_width() // 2,
+                start_y + idx * (MENU_BUTTON_HEIGHT + MENU_BUTTON_GAP),
+            )
+            hovered = rect.collidepoint(mouse_x, mouse_y)
+            if hovered:
+                selected_index = idx
+            draw_button(
+                screen,
+                rect,
+                label,
+                MENU_BUTTON_FONT_SIZE,
+                hovered=hovered,
+                selected=idx == selected_index,
+            )
             button_rects.append((label, rect))
 
         pygame.display.update()
@@ -96,8 +91,15 @@ def show_main_menu(
                 for label, rect in button_rects:
                     if rect.collidepoint(event.pos):
                         return label.lower()
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return "exit"
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return "exit"
+                if event.key in (pygame.K_UP, pygame.K_w):
+                    selected_index = (selected_index - 1) % len(button_labels)
+                elif event.key in (pygame.K_DOWN, pygame.K_s):
+                    selected_index = (selected_index + 1) % len(button_labels)
+                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    return button_labels[selected_index].lower()
 
 
 def show_game_mode_selector(
@@ -114,44 +116,38 @@ def show_game_mode_selector(
         selected_mode = GAME_MODE_ORDER[selected_index]
         screen.blit(background_img, (0, 0))
         overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 120))
+        overlay.fill((8, 10, 16, 150))
         screen.blit(overlay, (0, 0))
 
-        draw_text(screen, "Choose Mode", 36, WHITE, screen.get_width() // 2, 75)
-        draw_text(screen, "Click a mode or use UP/DOWN / W/S", 18, GRAY, screen.get_width() // 2, 118)
-        draw_text(screen, "ENTER to start", 18, GRAY, screen.get_width() // 2, 142)
+        draw_text_shadow(screen, "Choose Mode", MODE_TITLE_FONT_SIZE, WHITE, screen.get_width() // 2, 74)
 
         mouse_pos = pygame.mouse.get_pos()
         mode_rects: list[tuple[pygame.Rect, str]] = []
         for idx, mode in enumerate(GAME_MODE_ORDER):
-            y = 225 + idx * 56
+            y = 162 + idx * (MODE_CARD_HEIGHT + MODE_CARD_GAP)
             label = game_mode_label(mode)
-            font = pygame.font.SysFont("comicsans", 32 if mode == selected_mode else 24)
-            text_width, text_height = font.size(label)
-            hit_rect = pygame.Rect(0, 0, max(210, text_width + 38), text_height + 18)
+            hit_rect = pygame.Rect(0, 0, MODE_CARD_WIDTH, MODE_CARD_HEIGHT)
             hit_rect.center = (screen.get_width() // 2, y)
             hovered = hit_rect.collidepoint(mouse_pos)
             if hovered:
                 selected_index = idx
                 selected_mode = mode
             is_selected = mode == selected_mode
-            color = RED if is_selected else WHITE
-            size = 32 if is_selected else 24
-            if is_selected:
-                pygame.draw.rect(screen, (0, 0, 0), hit_rect.inflate(16, 4), border_radius=6)
-                pygame.draw.rect(screen, RED, hit_rect.inflate(16, 4), width=1, border_radius=6)
-            draw_text(screen, label, size, color, screen.get_width() // 2, y)
+            fill = (48, 18, 24) if is_selected else PANEL_BG
+            border = RED if is_selected else PANEL_BORDER
+            draw_panel(screen, hit_rect, fill, border, radius=8)
+            draw_text(screen, label, MODE_NAME_FONT_SIZE, WHITE, screen.get_width() // 2, y - 13)
+            draw_text(
+                screen,
+                game_mode_description(mode),
+                MODE_DESCRIPTION_FONT_SIZE,
+                MUTED_TEXT,
+                screen.get_width() // 2,
+                y + 16,
+            )
             mode_rects.append((hit_rect, mode))
 
-        draw_text(
-            screen,
-            game_mode_description(selected_mode),
-            18,
-            WHITE,
-            screen.get_width() // 2,
-            screen.get_height() - 112,
-        )
-        draw_text(screen, "ESC to return", 18, GRAY, screen.get_width() // 2, screen.get_height() - 55)
+        draw_text(screen, "ESC to return", 17, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 35)
 
         pygame.display.update()
         clock.tick(FPS)

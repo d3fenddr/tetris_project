@@ -46,6 +46,18 @@ class AccountService:
         self.save_account(account)
         return account
 
+    def authenticate_or_register(self, nickname: str, password: str) -> tuple[AccountSession, bool]:
+        auth = self.backend_client.authenticate_or_register(nickname, password)
+        user = auth.user or self.backend_client.get_current_user()
+        account = AccountSession(
+            username=str(user.get("nickname", nickname)),
+            user_id=int(user.get("id")) if user.get("id") is not None else None,
+            access_token=auth.access_token,
+            refresh_token=auth.refresh_token,
+        )
+        self.save_account(account)
+        return account, auth.created
+
     def refresh_current_user(self) -> Optional[dict]:
         account = self.load_account()
         if not account or not account.access_token:

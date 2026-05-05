@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import queue
+import threading
 from typing import Callable
 
 import pygame
@@ -8,10 +10,15 @@ from src.config import (
     BLACK,
     BLOCK_SIZE,
     COLS,
-    DARK_RED,
     FPS,
     GRAY,
     HARD_DROP_SCORE_PER_ROW,
+    HUD_MODE_FONT_SIZE,
+    HUD_SCORE_FONT_SIZE,
+    HUD_SCORE_SHADOW_COLOR,
+    HUD_SCORE_SHADOW_OFFSET,
+    HUD_SCORE_TEXT_COLOR,
+    LOCKED_PIECE_COLOR,
     RED,
     ROWS,
     SHAPES,
@@ -25,7 +32,7 @@ from src.game.scoring import score_for_cleared_lines
 from src.services.score_service import ScoreService
 from src.state import AppState
 from src.ui.score_effects import ScoreEffectManager
-from src.utils.ui_helpers import draw_text
+from src.utils.ui_helpers import draw_button, draw_text, draw_text_shadow
 
 
 def draw_grid(screen: pygame.Surface, background_img: pygame.Surface, grid: list[list[int]]) -> None:
@@ -36,7 +43,7 @@ def draw_grid(screen: pygame.Surface, background_img: pygame.Surface, grid: list
             if grid[y][x]:
                 pygame.draw.rect(
                     screen,
-                    DARK_RED,
+                    LOCKED_PIECE_COLOR,
                     (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
                 )
     for y in range(ROWS + 1):
@@ -60,27 +67,25 @@ def draw_game_hud(
     effects: ScoreEffectManager,
     now_ms: int,
 ) -> None:
-    panel = pygame.Rect(10, 8, screen.get_width() - 20, 54)
-    overlay = pygame.Surface(panel.size, pygame.SRCALPHA)
-    overlay.fill((0, 0, 0, 150))
-    screen.blit(overlay, panel.topleft)
-    pygame.draw.rect(screen, GRAY, panel, 1)
-
-    draw_text(
+    draw_text_shadow(
         screen,
         f"Score: {score}",
-        effects.score_font_size(24, now_ms),
-        WHITE,
-        panel.centerx,
-        panel.y + 18,
+        effects.score_font_size(HUD_SCORE_FONT_SIZE, now_ms),
+        HUD_SCORE_TEXT_COLOR,
+        screen.get_width() // 2,
+        27,
+        HUD_SCORE_SHADOW_COLOR,
+        HUD_SCORE_SHADOW_OFFSET,
     )
-    draw_text(
+    draw_text_shadow(
         screen,
         f"Mode: {game_mode_label(game_mode)}",
-        16,
-        GRAY,
-        panel.centerx,
-        panel.y + 40,
+        HUD_MODE_FONT_SIZE,
+        WHITE,
+        screen.get_width() // 2,
+        54,
+        HUD_SCORE_SHADOW_COLOR,
+        HUD_SCORE_SHADOW_OFFSET,
     )
 
 
@@ -97,8 +102,14 @@ def game_over_screen(
     clock: pygame.time.Clock,
     score: int,
     submit_message: str = "",
+    submit_queue: "queue.Queue[str] | None" = None,
 ) -> bool:
     while True:
+        if submit_queue is not None:
+            try:
+                submit_message = submit_queue.get_nowait()
+            except queue.Empty:
+                pass
         screen.fill(BLACK)
         draw_text(screen, "GAME OVER", 45, RED, screen.get_width() // 2, screen.get_height() // 3)
         draw_text(screen, f"Score: {score}", 28, WHITE, screen.get_width() // 2, screen.get_height() // 3 + 60)
@@ -106,10 +117,9 @@ def game_over_screen(
             draw_text(screen, submit_message[:42], 15, GRAY, screen.get_width() // 2, screen.get_height() // 3 + 95)
         play_rect = pygame.Rect(screen.get_width() // 2 - 75, screen.get_height() // 2, 150, 40)
         menu_rect = pygame.Rect(screen.get_width() // 2 - 75, screen.get_height() // 2 + 60, 150, 40)
-        pygame.draw.rect(screen, GRAY, play_rect)
-        pygame.draw.rect(screen, GRAY, menu_rect)
-        draw_text(screen, "Play Again", 30, BLACK, play_rect.centerx, play_rect.centery)
-        draw_text(screen, "Main Menu", 30, BLACK, menu_rect.centerx, menu_rect.centery)
+        mouse_pos = pygame.mouse.get_pos()
+        draw_button(screen, play_rect, "Play Again", 22, hovered=play_rect.collidepoint(mouse_pos), selected=True)
+        draw_button(screen, menu_rect, "Main Menu", 22, hovered=menu_rect.collidepoint(mouse_pos))
         pygame.display.update()
         clock.tick(FPS)
 
@@ -282,7 +292,19 @@ def main_game(
         single_action_keys_held.clear()
         if on_game_over is not None:
             on_game_over()
-        submitted = score_service.record_score(state.player_name, score, mode=state.game_mode, lines=total_lines, level=1)
-        submit_message = "Season 2 score submitted." if submitted else "Score not submitted. Log in or check backend."
-        if not game_over_screen(screen, clock, score, submit_message):
+        submit_queue: "queue.Queue[str]" = queue.Queue()
+
+        def submit_worker() -> None:
+            submitted = score_service.record_score(
+                state.player_name,
+                score,
+                mode=state.game_mode,
+                lines=total_lines,
+                level=1,
+            )
+            message = "Season 2 score submitted." if submitted else "Score not submitted. Check backend."
+            submit_queue.put(message)
+
+        threading.Thread(target=submit_worker, daemon=True).start()
+        if not game_over_screen(screen, clock, score, "Submitting Season 2 score...", submit_queue):
             break

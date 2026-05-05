@@ -13,6 +13,8 @@ from backend.app.models import RefreshSession, Score, User
 from backend.app.nicknames import validate_available_nickname, validate_nickname_format, normalize_nickname
 from backend.app.schemas import (
     ChangeNicknameRequest,
+    EnterRequest,
+    EnterResponse,
     LoginRequest,
     LogoutRequest,
     NicknameChangeResponse,
@@ -62,6 +64,21 @@ def _user_response(db: Session, user: User) -> UserResponse:
     )
 
 
+def _token_pair_for_user(db: Session, user: User) -> TokenPairResponse:
+    user.last_login_at = datetime.utcnow()
+    user.updated_at = datetime.utcnow()
+    access_token = create_access_token(subject=str(user.id), extra_claims={"nickname": user.nickname})
+    refresh_token = create_refresh_token()
+    refresh = RefreshSession(
+        user_id=user.id,
+        refresh_token_hash=hash_refresh_token(refresh_token),
+        expires_at=datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days),
+    )
+    db.add(refresh)
+    db.commit()
+    return TokenPairResponse(access_token=access_token, refresh_token=refresh_token)
+
+
 @router.post("/register", response_model=UserResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> UserResponse:
     try:
@@ -93,18 +110,47 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenPairResp
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
 
-    user.last_login_at = datetime.utcnow()
-    user.updated_at = datetime.utcnow()
-    access_token = create_access_token(subject=str(user.id), extra_claims={"nickname": user.nickname})
-    refresh_token = create_refresh_token()
-    refresh = RefreshSession(
-        user_id=user.id,
-        refresh_token_hash=hash_refresh_token(refresh_token),
-        expires_at=datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days),
+    return _token_pair_for_user(db, user)
+
+
+@router.post("/enter", response_model=EnterResponse)
+def enter(payload: EnterRequest, db: Session = Depends(get_db)) -> EnterResponse:
+    try:
+        clean_nickname = validate_nickname_format(payload.nickname)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    normalized = normalize_nickname(clean_nickname)
+    user = db.query(User).filter(User.normalized_nickname == normalized).first()
+    created = False
+
+    if user:
+        if not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
+    else:
+        try:
+            nickname, normalized = validate_available_nickname(db, clean_nickname)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        user = User(
+            nickname=nickname,
+            normalized_nickname=normalized,
+            password_hash=hash_password(payload.password),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        created = True
+
+    tokens = _token_pair_for_user(db, user)
+    db.refresh(user)
+    return EnterResponse(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        created=created,
+        user=_user_response(db, user),
     )
-    db.add(refresh)
-    db.commit()
-    return TokenPairResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/logout")

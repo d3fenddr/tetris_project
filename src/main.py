@@ -26,9 +26,9 @@ from src.services.session_service import SessionService
 from src.state import AppState
 from src.ui.history import show_history
 from src.ui.leaderboard import show_leaderboard, show_season1_top3
-from src.ui.menu import ensure_player_name, show_game_mode_selector, show_main_menu
+from src.ui.menu import show_game_mode_selector, show_main_menu
 from src.ui.pause import pause_menu
-from src.ui.profile import profile_screen
+from src.ui.profile import account_startup_screen, profile_screen
 from src.ui.settings import settings_menu
 
 
@@ -60,11 +60,12 @@ def run() -> None:
 
     state = AppState.from_storage(session_service.load())
     saved_account = account_service.load_account()
-    if saved_account:
-        user = account_service.refresh_current_user()
+    if saved_account and account_service.refresh_current_user():
         state.account = account_service.load_account()
         if state.account:
             state.player_name = state.account.username
+    else:
+        state.account = None
 
     def persist_state() -> None:
         session_service.update_state(state.to_storage())
@@ -108,7 +109,8 @@ def run() -> None:
             pygame.mixer.music.stop()
             current_music["path"] = ""
 
-    ensure_player_name(screen, clock, state, assets.first_page_img)
+    if not state.account:
+        account_startup_screen(screen, clock, state, account_service, persist_state)
     persist_state()
 
     while True:
@@ -153,6 +155,8 @@ def run() -> None:
             show_history(screen, clock, state, score_service)
         elif action == "profile":
             profile_screen(screen, clock, state, account_service, persist_state)
+            if not state.account:
+                account_startup_screen(screen, clock, state, account_service, persist_state)
         elif action == "season 1 top 3":
             show_season1_top3(screen, clock, score_service)
         elif action == "settings":
