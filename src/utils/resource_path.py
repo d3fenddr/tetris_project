@@ -1,11 +1,21 @@
 from __future__ import annotations
 
-import os
 import sys
+from pathlib import Path
 
 
-def resource_path(relative_path: str) -> str:
-    if hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, relative_path)  # type: ignore[attr-defined]
-    return os.path.join(os.path.abspath("."), relative_path)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_ROOT = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
+ASSETS_DIR = RUNTIME_ROOT / "assets"
+IMAGES_DIR = ASSETS_DIR / "images"
+MUSIC_DIR = ASSETS_DIR / "audio" / "music"
+SOUNDS_DIR = ASSETS_DIR / "audio" / "sounds"
+FONTS_DIR = ASSETS_DIR / "fonts"
 
+
+def resource_path(relative_path: str | Path) -> str:
+    return str(RUNTIME_ROOT / relative_path)
+
+
+def asset_path(*parts: str) -> str:
+    return str(ASSETS_DIR.joinpath(*parts))

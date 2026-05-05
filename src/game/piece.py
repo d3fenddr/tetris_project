@@ -17,7 +17,7 @@ class Piece:
     def spawn(
         cls,
         shapes: Sequence[list[list[int]]],
-        weights: Sequence[int],
+        weights: Sequence[float],
         cols: int,
     ) -> "Piece":
         idx = random.choices(range(len(shapes)), weights=weights, k=1)[0]
@@ -67,4 +67,3 @@ class Piece:
                     )
                     pygame.draw.rect(screen, fill_color, rect)
                     pygame.draw.rect(screen, border_color, rect, 1)
-

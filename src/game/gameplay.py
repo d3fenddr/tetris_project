@@ -11,17 +11,20 @@ from src.config import (
     DARK_RED,
     FPS,
     GRAY,
+    HARD_DROP_SCORE_PER_ROW,
     RED,
     ROWS,
     SHAPES,
-    VALIDATED_SHAPE_WEIGHTS,
     WHITE,
 )
 from src.game.board import clear_full_rows, create_grid
+from src.game.input import KeyRepeatController
+from src.game.modes import game_mode_label, piece_weights_for_mode
 from src.game.piece import Piece
 from src.game.scoring import score_for_cleared_lines
 from src.services.score_service import ScoreService
 from src.state import AppState
+from src.ui.score_effects import ScoreEffectManager
 from src.utils.ui_helpers import draw_text
 
 
@@ -43,6 +46,44 @@ def draw_grid(screen: pygame.Surface, background_img: pygame.Surface, grid: list
     pygame.draw.rect(screen, GRAY, (0, 0, width, height), 2)
 
 
+def _focus_lost(event: pygame.event.Event) -> bool:
+    window_focus_lost = getattr(pygame, "WINDOWFOCUSLOST", None)
+    if window_focus_lost is not None and event.type == window_focus_lost:
+        return True
+    return event.type == pygame.ACTIVEEVENT and getattr(event, "gain", 1) == 0
+
+
+def draw_game_hud(
+    screen: pygame.Surface,
+    score: int,
+    game_mode: str,
+    effects: ScoreEffectManager,
+    now_ms: int,
+) -> None:
+    panel = pygame.Rect(10, 8, screen.get_width() - 20, 54)
+    overlay = pygame.Surface(panel.size, pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 150))
+    screen.blit(overlay, panel.topleft)
+    pygame.draw.rect(screen, GRAY, panel, 1)
+
+    draw_text(
+        screen,
+        f"Score: {score}",
+        effects.score_font_size(24, now_ms),
+        WHITE,
+        panel.centerx,
+        panel.y + 18,
+    )
+    draw_text(
+        screen,
+        f"Mode: {game_mode_label(game_mode)}",
+        16,
+        GRAY,
+        panel.centerx,
+        panel.y + 40,
+    )
+
+
 def countdown(screen: pygame.Surface, clock: pygame.time.Clock) -> None:
     for value in range(3, 0, -1):
         screen.fill(BLACK)
@@ -51,11 +92,18 @@ def countdown(screen: pygame.Surface, clock: pygame.time.Clock) -> None:
         clock.tick(1)
 
 
-def game_over_screen(screen: pygame.Surface, clock: pygame.time.Clock, score: int) -> bool:
+def game_over_screen(
+    screen: pygame.Surface,
+    clock: pygame.time.Clock,
+    score: int,
+    submit_message: str = "",
+) -> bool:
     while True:
         screen.fill(BLACK)
         draw_text(screen, "GAME OVER", 45, RED, screen.get_width() // 2, screen.get_height() // 3)
         draw_text(screen, f"Score: {score}", 28, WHITE, screen.get_width() // 2, screen.get_height() // 3 + 60)
+        if submit_message:
+            draw_text(screen, submit_message[:42], 15, GRAY, screen.get_width() // 2, screen.get_height() // 3 + 95)
         play_rect = pygame.Rect(screen.get_width() // 2 - 75, screen.get_height() // 2, 150, 40)
         menu_rect = pygame.Rect(screen.get_width() // 2 - 75, screen.get_height() // 2 + 60, 150, 40)
         pygame.draw.rect(screen, GRAY, play_rect)
@@ -82,68 +130,159 @@ def main_game(
     background_img: pygame.Surface,
     score_service: ScoreService,
     open_pause_menu: Callable[[Callable[[], None], int], str | None],
+    on_game_over: Callable[[], None] | None = None,
 ) -> None:
     while True:
         countdown(screen, clock)
 
         locked: dict[tuple[int, int], int] = {}
         fall_time = 0
-        move_delay = 0
         fall_speed = 1.0
         score = 0
-        piece = Piece.spawn(SHAPES, VALIDATED_SHAPE_WEIGHTS, COLS)
+        total_lines = 0
+        piece_weights = piece_weights_for_mode(state.game_mode)
+        piece = Piece.spawn(SHAPES, piece_weights, COLS)
+        effects = ScoreEffectManager()
+        key_repeat = KeyRepeatController({})
+        single_action_keys_held: set[int] = set()
         running = True
+
+        def current_grid() -> list[list[int]]:
+            return create_grid(locked, ROWS, COLS)
+
+        def spawn_piece() -> Piece:
+            return Piece.spawn(SHAPES, piece_weights, COLS)
+
+        def move_piece(dx: int, dy: int) -> bool:
+            nonlocal piece
+            grid = current_grid()
+            if piece.valid_move(dx, dy, grid, COLS, ROWS):
+                piece.x += dx
+                piece.y += dy
+                return True
+            return False
+
+        def lock_piece(now_ms: int) -> None:
+            nonlocal locked, piece, running, score, total_lines, fall_time
+            for x, y in piece.get_cells():
+                locked[(x, y)] = 1
+
+            locked, cleared = clear_full_rows(locked, ROWS, COLS)
+            if cleared:
+                total_lines += cleared
+                points = score_for_cleared_lines(cleared)
+                score += points
+                effects.add_line_clear(
+                    points=points,
+                    lines=cleared,
+                    now_ms=now_ms,
+                    x=screen.get_width() // 2,
+                    y=screen.get_height() // 2,
+                )
+
+            piece = spawn_piece()
+            grid = current_grid()
+            if not piece.valid_move(0, 0, grid, COLS, ROWS):
+                running = False
+                key_repeat.clear()
+                single_action_keys_held.clear()
+            fall_time = 0
+
+        def soft_drop() -> None:
+            nonlocal fall_time
+            now_ms = pygame.time.get_ticks()
+            if not move_piece(0, 1):
+                lock_piece(now_ms)
+            fall_time = 0
+
+        def hard_drop() -> None:
+            nonlocal score
+            now_ms = pygame.time.get_ticks()
+            dropped_rows = 0
+            while move_piece(0, 1):
+                dropped_rows += 1
+            if dropped_rows and HARD_DROP_SCORE_PER_ROW > 0:
+                points = dropped_rows * HARD_DROP_SCORE_PER_ROW
+                score += points
+                effects.add_score(
+                    points=points,
+                    now_ms=now_ms,
+                    x=screen.get_width() // 2,
+                    y=96,
+                )
+            lock_piece(now_ms)
+
+        key_repeat.actions = {
+            pygame.K_LEFT: lambda: move_piece(-1, 0),
+            pygame.K_RIGHT: lambda: move_piece(1, 0),
+            pygame.K_DOWN: soft_drop,
+        }
+
+        def draw_frame() -> None:
+            now_ms = pygame.time.get_ticks()
+            grid = current_grid()
+            draw_grid(screen, background_img, grid)
+            piece.draw(screen, BLOCK_SIZE, WHITE, BLACK)
+            effects.draw_board_flash(
+                screen,
+                pygame.Rect(0, 0, screen.get_width(), screen.get_height()),
+                now_ms,
+            )
+            draw_game_hud(screen, score, state.game_mode, effects, now_ms)
+            effects.draw_popups(screen, now_ms)
 
         while running:
             dt = clock.tick(FPS)
+            now_ms = pygame.time.get_ticks()
             fall_time += dt
-            move_delay += dt
-            grid = create_grid(locked, ROWS, COLS)
-
-            keys = pygame.key.get_pressed()
-            if keys[pygame.K_DOWN] and move_delay > 50:
-                if piece.valid_move(0, 1, grid, COLS, ROWS):
-                    piece.y += 1
-                move_delay = 0
-
-            if fall_time / 1000 >= fall_speed:
-                if piece.valid_move(0, 1, grid, COLS, ROWS):
-                    piece.y += 1
-                else:
-                    for x, y in piece.get_cells():
-                        locked[(x, y)] = 1
-                    locked, cleared = clear_full_rows(locked, ROWS, COLS)
-                    score += score_for_cleared_lines(cleared)
-                    piece = Piece.spawn(SHAPES, VALIDATED_SHAPE_WEIGHTS, COLS)
-                    grid = create_grid(locked, ROWS, COLS)
-                    if not piece.valid_move(0, 0, grid, COLS, ROWS):
-                        running = False
-                fall_time = 0
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     raise SystemExit
+                if _focus_lost(event):
+                    key_repeat.clear()
+                    single_action_keys_held.clear()
+                if event.type == pygame.KEYUP:
+                    key_repeat.release(event.key)
+                    single_action_keys_held.discard(event.key)
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_LEFT and piece.valid_move(-1, 0, grid, COLS, ROWS):
-                        piece.x -= 1
-                    elif event.key == pygame.K_RIGHT and piece.valid_move(1, 0, grid, COLS, ROWS):
-                        piece.x += 1
+                    if key_repeat.press(event.key, now_ms):
+                        continue
                     elif event.key == pygame.K_UP:
-                        piece.rotate(grid, COLS, ROWS)
+                        if event.key in single_action_keys_held:
+                            continue
+                        single_action_keys_held.add(event.key)
+                        piece.rotate(current_grid(), COLS, ROWS)
+                    elif event.key == pygame.K_SPACE:
+                        if event.key in single_action_keys_held:
+                            continue
+                        single_action_keys_held.add(event.key)
+                        hard_drop()
                     elif event.key == pygame.K_ESCAPE:
-                        def draw_frame() -> None:
-                            draw_grid(screen, background_img, grid)
-                            piece.draw(screen, BLOCK_SIZE, WHITE, BLACK)
-
+                        key_repeat.clear()
+                        single_action_keys_held.clear()
                         result = open_pause_menu(draw_frame, score)
+                        key_repeat.clear()
+                        single_action_keys_held.clear()
                         if result == "exit":
                             return
 
-            draw_grid(screen, background_img, grid)
-            piece.draw(screen, BLOCK_SIZE, WHITE, BLACK)
-            draw_text(screen, f"Score: {score}", 24, WHITE, screen.get_width() // 2, 20)
+            if running:
+                key_repeat.update(now_ms)
+
+            if running and fall_time / 1000 >= fall_speed:
+                if not move_piece(0, 1):
+                    lock_piece(now_ms)
+                fall_time = 0
+
+            draw_frame()
             pygame.display.update()
 
-        score_service.record_score(state.player_name, score)
-        if not game_over_screen(screen, clock, score):
+        key_repeat.clear()
+        single_action_keys_held.clear()
+        if on_game_over is not None:
+            on_game_over()
+        submitted = score_service.record_score(state.player_name, score, mode=state.game_mode, lines=total_lines, level=1)
+        submit_message = "Season 2 score submitted." if submitted else "Score not submitted. Log in or check backend."
+        if not game_over_screen(screen, clock, score, submit_message):
             break

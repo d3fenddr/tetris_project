@@ -5,10 +5,13 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
+from src.config import DEFAULT_GAME_MODE
+
 
 DEFAULT_SESSION_DATA: Dict[str, Any] = {
     "volume_percent": 100,
     "music_enabled": True,
+    "game_mode": DEFAULT_GAME_MODE,
     "player_name": "",
     "account": None,
     "pending_scores": [],

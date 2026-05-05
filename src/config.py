@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import List
 
 APP_TITLE = "Tetris"
@@ -21,16 +22,42 @@ GOLD = (255, 215, 0)
 SILVER = (192, 192, 192)
 BRONZE = (205, 127, 50)
 
-ASSET_MENU_MUSIC = "menu-music.mp3"
-ASSET_GAME_MUSIC = "game-music.mp3"
-ASSET_BACKGROUND = "background.png"
-ASSET_FIRST_PAGE = "first_page.png"
+ASSET_MENU_MUSIC = "assets/audio/music/menu-music.mp3"
+ASSET_GAME_MUSIC = "assets/audio/music/game-music.mp3"
+ASSET_BACKGROUND = "assets/images/background.png"
+ASSET_FIRST_PAGE = "assets/images/first_page.png"
 
 BASE_MAX_VOLUME = 0.07
 DEFAULT_VOLUME_PERCENT = 100
 DEFAULT_MUSIC_ENABLED = True
 MAX_PLAYER_NAME_LENGTH = 12
 BUTTON_DEBOUNCE_MS = 180
+TETRIS_BACKEND_URL = os.getenv("TETRIS_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+CURRENT_SEASON = 2
+ARCHIVED_SEASON = 1
+
+KEY_REPEAT_INITIAL_DELAY_MS = 140
+KEY_REPEAT_MOVE_INTERVAL_MS = 45
+KEY_REPEAT_SOFT_DROP_INTERVAL_MS = 35
+
+SCORE_EFFECTS_ENABLED = True
+SCORE_POPUP_DURATION_MS = 850
+SCORE_POPUP_RISE_PIXELS = 48
+SCORE_POPUP_FONT_SIZE = 26
+SCORE_POPUP_LINE_CLEAR_FONT_SIZE = 30
+SCORE_POPUP_MAX_ACTIVE = 6
+SCORE_POPUP_COLOR = WHITE
+SCORE_POPUP_LINE_CLEAR_COLOR = GOLD
+SCORE_POPUP_COMBO_COLOR = RED
+BOARD_FLASH_DURATION_MS = 280
+BOARD_FLASH_MAX_ALPHA = 120
+BOARD_FLASH_WIDTH = 5
+BOARD_FLASH_COLOR = GOLD
+SCORE_PULSE_DURATION_MS = 260
+SCORE_PULSE_SCALE = 1.25
+COMBO_WINDOW_MS = 1800
+COMBO_DISPLAY_DURATION_MS = 950
+HARD_DROP_SCORE_PER_ROW = 2
 
 GOOGLE_SHEET_CSV_URL = (
     "https://docs.google.com/spreadsheets/d/1bFY8FxdE8gl1qFj3jQm7bta9Pizw_yqkSpm-CqRr2JE/"
@@ -65,14 +92,62 @@ SHAPES = [
     [[1, 0], [1, 0], [1, 1]],  # L
     [[0, 1], [0, 1], [1, 1]],  # J
 ]
-SHAPE_WEIGHTS = [100, 100, 100, 100, 100, 35, 100, 100]
+SHAPE_NAMES = ["T", "O", "Z", "S", "I", "88", "L", "J"]
+SHAPE_WEIGHTS = [100, 100, 100, 100, 100, 17.5, 100, 100]
+
+GAME_MODE_PEACEFUL = "peaceful"
+GAME_MODE_EASY = "easy"
+GAME_MODE_NORMAL = "normal"
+GAME_MODE_HARD = "hard"
+DEFAULT_GAME_MODE = GAME_MODE_NORMAL
+
+DEFAULT_PIECE_WEIGHT = 100
+PEACEFUL_EXCLUDED_PIECE = "88"
+EASY_LOW_WEIGHT_PIECE = "88"
+EASY_LOW_WEIGHT = 17.5
+NORMAL_DOUBLE_WEIGHT_PIECE = "88"
+NORMAL_DOUBLE_WEIGHT = 35
+HARD_FREQUENT_PIECE = "88"
+HARD_FREQUENT_WEIGHT = 100
+
+GAME_MODE_CONFIGS = {
+    GAME_MODE_PEACEFUL: {
+        "label": "Peaceful",
+        "description": "One configured piece is disabled.",
+        "excluded_pieces": [PEACEFUL_EXCLUDED_PIECE],
+        "weights": {},
+    },
+    GAME_MODE_EASY: {
+        "label": "Easy",
+        "description": "One configured piece appears rarely.",
+        "excluded_pieces": [],
+        "weights": {EASY_LOW_WEIGHT_PIECE: EASY_LOW_WEIGHT},
+    },
+    GAME_MODE_NORMAL: {
+        "label": "Normal",
+        "description": "One configured piece appears more often.",
+        "excluded_pieces": [],
+        "weights": {NORMAL_DOUBLE_WEIGHT_PIECE: NORMAL_DOUBLE_WEIGHT},
+    },
+    GAME_MODE_HARD: {
+        "label": "Hard",
+        "description": "One configured piece appears very often.",
+        "excluded_pieces": [],
+        "weights": {HARD_FREQUENT_PIECE: HARD_FREQUENT_WEIGHT},
+    },
+}
+GAME_MODE_ORDER = [
+    GAME_MODE_PEACEFUL,
+    GAME_MODE_EASY,
+    GAME_MODE_NORMAL,
+    GAME_MODE_HARD,
+]
 
 
-def validated_shape_weights() -> List[int]:
+def validated_shape_weights() -> List[float]:
     if len(SHAPE_WEIGHTS) == len(SHAPES):
         return SHAPE_WEIGHTS
     return [100] * len(SHAPES)
 
 
 VALIDATED_SHAPE_WEIGHTS = validated_shape_weights()
-

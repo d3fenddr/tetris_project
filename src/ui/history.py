@@ -51,10 +51,19 @@ def show_history(
 
     def apply_sort(items: List[Dict[str, str | int]]) -> List[Dict[str, str | int]]:
         if sort_mode == "date":
-            key = lambda row: parse_sheet_datetime(str(row.get("date", ""))) or datetime.min
+            key = lambda row: _history_datetime(row)
         else:
             key = lambda row: int(row.get("score", 0))
         return sorted(items, key=key, reverse=not ascending)
+
+    def _history_datetime(row: Dict[str, str | int]) -> datetime:
+        raw = str(row.get("date") or row.get("created_at") or "")
+        if "T" in raw:
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                return datetime.min
+        return parse_sheet_datetime(raw) or datetime.min
 
     while True:
         if loading:
@@ -81,7 +90,7 @@ def show_history(
             page = min(page, pages - 1)
             display = filtered[page * per_page : (page + 1) * per_page]
 
-            draw_text(screen, f"History: Page {page + 1}/{pages}", 28, WHITE, screen.get_width() // 2, 30)
+            draw_text(screen, f"Season 2 History: Page {page + 1}/{pages}", 24, WHITE, screen.get_width() // 2, 30)
             draw_text(screen, f"Total Games: {len(history)}", 20, GRAY, screen.get_width() // 2, 60)
 
             if not display:
@@ -89,7 +98,7 @@ def show_history(
             else:
                 history_by_date = sorted(
                     history,
-                    key=lambda row: parse_sheet_datetime(str(row.get("date", ""))) or datetime.min,
+                    key=_history_datetime,
                 )
                 game_index_map = {id(rec): idx + 1 for idx, rec in enumerate(history_by_date)}
                 for idx, record in enumerate(display):
@@ -97,9 +106,16 @@ def show_history(
                     game_number = game_index_map.get(id(record), page * per_page + idx + 1)
                     draw_text(screen, f"Game {game_number}", 22, WHITE, screen.get_width() // 2 - 100, y)
                     draw_text(screen, f"Score: {int(record.get('score', 0))}", 20, WHITE, screen.get_width() // 2 - 100, y + 25)
-                    date_value = str(record.get("date", ""))
-                    draw_text(screen, format_short_date(date_value), 18, GRAY, screen.get_width() // 2 + 60, y + 5)
-                    draw_text(screen, format_short_time(date_value), 16, GRAY, screen.get_width() // 2 + 60, y + 25)
+                    date_value = str(record.get("date") or record.get("created_at") or "")
+                    mode = str(record.get("mode", ""))
+                    if "T" in date_value:
+                        short_date = date_value[:10]
+                        short_time = date_value[11:16]
+                    else:
+                        short_date = format_short_date(date_value)
+                        short_time = format_short_time(date_value)
+                    draw_text(screen, short_date, 16, GRAY, screen.get_width() // 2 + 60, y + 2)
+                    draw_text(screen, f"{short_time} {mode}", 14, GRAY, screen.get_width() // 2 + 60, y + 23)
 
             draw_text(screen, "LEFT / RIGHT: Page", 20, GRAY, screen.get_width() // 2, screen.get_height() - 80)
             draw_text(screen, f"S - Sort with: {sort_mode}", 20, GRAY, screen.get_width() // 2, screen.get_height() - 55)

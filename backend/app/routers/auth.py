@@ -3,15 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.dependencies import get_current_user
-from backend.app.models import RefreshSession, User
+from backend.app.models import RefreshSession, Score, User
+from backend.app.nicknames import validate_available_nickname, validate_nickname_format, normalize_nickname
 from backend.app.schemas import (
+    ChangeNicknameRequest,
     LoginRequest,
     LogoutRequest,
+    NicknameChangeResponse,
     RegisterRequest,
     TokenPairResponse,
     UserResponse,
@@ -27,27 +31,71 @@ from backend.app.security import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register", response_model=UserResponse)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
-    existing = db.query(User).filter(User.username == payload.username).first()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists.")
+def _rank_for_user(db: Session, user: User) -> int | None:
+    best_score = (
+        db.query(func.max(Score.score))
+        .filter(Score.user_id == user.id, Score.season == settings.current_season)
+        .scalar()
+    )
+    if best_score is None:
+        return None
+    better_count = (
+        db.query(Score.user_id)
+        .filter(Score.season == settings.current_season)
+        .group_by(Score.user_id)
+        .having(func.max(Score.score) > best_score)
+        .count()
+    )
+    return better_count + 1
 
-    user = User(username=payload.username.strip(), password_hash=hash_password(payload.password))
+
+def _user_response(db: Session, user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        nickname=user.nickname,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+        last_login_at=user.last_login_at,
+        games_played=user.games_played or 0,
+        best_score=user.best_score or 0,
+        current_season_rank=_rank_for_user(db, user),
+    )
+
+
+@router.post("/register", response_model=UserResponse)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> UserResponse:
+    try:
+        nickname, normalized = validate_available_nickname(db, payload.nickname)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    user = User(
+        nickname=nickname,
+        normalized_nickname=normalized,
+        password_hash=hash_password(payload.password),
+        updated_at=datetime.utcnow(),
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return _user_response(db, user)
 
 
 @router.post("/login", response_model=TokenPairResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenPairResponse:
-    user = db.query(User).filter(User.username == payload.username).first()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password.")
+    try:
+        clean_nickname = validate_nickname_format(payload.nickname)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
 
-    user.last_login = datetime.utcnow()
-    access_token = create_access_token(subject=str(user.id), extra_claims={"username": user.username})
+    normalized = normalize_nickname(clean_nickname)
+    user = db.query(User).filter(User.normalized_nickname == normalized).first()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
+
+    user.last_login_at = datetime.utcnow()
+    user.updated_at = datetime.utcnow()
+    access_token = create_access_token(subject=str(user.id), extra_claims={"nickname": user.nickname})
     refresh_token = create_refresh_token()
     refresh = RefreshSession(
         user_id=user.id,
@@ -82,6 +130,34 @@ def logout(
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user)) -> User:
-    return current_user
+def me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserResponse:
+    return _user_response(db, current_user)
 
+
+@router.patch("/me/nickname", response_model=NicknameChangeResponse)
+def change_nickname(
+    payload: ChangeNicknameRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> NicknameChangeResponse:
+    try:
+        nickname, normalized = validate_available_nickname(
+            db,
+            payload.nickname,
+            exclude_user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    current_user.nickname = nickname
+    current_user.normalized_nickname = normalized
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    return NicknameChangeResponse(
+        id=current_user.id,
+        nickname=current_user.nickname,
+        message="Nickname updated. Future results will use the new nickname.",
+    )
