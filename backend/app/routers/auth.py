@@ -160,7 +160,13 @@ def enter(payload: EnterRequest, db: Session = Depends(get_db)) -> EnterResponse
             created = True
 
         auth_response = _auth_response_for_user(db, user, created=created)
-        return EnterResponse(**auth_response.model_dump())
+        return EnterResponse(
+            access_token=auth_response.access_token,
+            refresh_token=auth_response.refresh_token,
+            token_type=auth_response.token_type,
+            created=auth_response.created,
+            user=auth_response.user,
+        )
     except HTTPException:
         raise
     except SQLAlchemyError as exc:

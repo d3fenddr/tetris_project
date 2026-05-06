@@ -10,9 +10,14 @@ from src.config import CURRENT_SEASON, DEBUG_ONLINE_SCORE_FLOW, NETWORK_TIMEOUT_
 
 
 class BackendClientError(RuntimeError):
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(self, message: str, status_code: int | None = None, error_type: str = "backend") -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.error_type = error_type
+
+    @property
+    def is_unavailable(self) -> bool:
+        return self.error_type == "network"
 
 
 @dataclass
@@ -63,26 +68,35 @@ class BackendClient:
         except requests.RequestException as exc:
             if should_log:
                 print(f"[score-flow] {method} {path} failed: backend unavailable")
-            raise BackendClientError("Online backend is unavailable.") from exc
+            raise BackendClientError("Online backend is unavailable.", error_type="network") from exc
 
         if should_log:
             print(f"[score-flow] {method} {path} -> HTTP {response.status_code}")
 
         if response.status_code >= 400:
             try:
-                detail = response.json().get("detail")
+                error_json = response.json()
+                detail = error_json.get("detail") if isinstance(error_json, dict) else None
+                if should_log and isinstance(error_json, dict):
+                    print(f"[score-flow] {method} {path} error body keys: {sorted(error_json.keys())}")
             except ValueError:
                 detail = response.text
             message = str(detail or "Backend request failed.")
             if should_log:
                 print(f"[score-flow] {method} {path} error: {message[:160]}")
-            raise BackendClientError(message, status_code=response.status_code)
+            raise BackendClientError(message, status_code=response.status_code, error_type="http")
 
         if response.status_code == 204:
             return None
         try:
-            return response.json()
+            data = response.json()
+            if should_log:
+                keys = sorted(data.keys()) if isinstance(data, dict) else []
+                print(f"[score-flow] {method} {path} JSON parsed: yes, keys={keys}")
+            return data
         except ValueError:
+            if should_log:
+                print(f"[score-flow] {method} {path} JSON parsed: no")
             return None
 
     def register(self, nickname: str, password: str) -> BackendAuth:
@@ -105,16 +119,17 @@ class BackendClient:
 
     def _auth_from_response(self, data: Any, default_created: bool = False) -> BackendAuth:
         if not isinstance(data, dict):
-            raise BackendClientError("Unexpected auth response from backend.")
+            raise BackendClientError("Unexpected auth response from backend.", error_type="parse")
         access_token = data.get("access_token")
         refresh_token = data.get("refresh_token")
         user = data.get("user") if isinstance(data.get("user"), dict) else None
         if not access_token or not refresh_token:
-            raise BackendClientError("Backend auth response did not include tokens.")
+            raise BackendClientError("Backend auth response did not include tokens.", error_type="parse")
         if DEBUG_ONLINE_SCORE_FLOW:
             print(
                 "[score-flow] Auth response parsed: "
-                f"access_token=yes, refresh_token=yes, user={'yes' if user else 'no'}"
+                f"success=yes, access_token=yes, refresh_token=yes, user={'yes' if user else 'no'}, "
+                f"user_id={user.get('id') if user else None}, nickname={user.get('nickname') if user else None}"
             )
         auth = BackendAuth(
             access_token=str(access_token),

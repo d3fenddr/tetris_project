@@ -97,10 +97,13 @@ class ScoreResponse(BaseModel):
 
 class LeaderboardItem(BaseModel):
     rank: int
+    user_id: int
     nickname: str
     score: int
     mode: str
     lines: int
+    level: int
+    season: int
     created_at: datetime
 
 

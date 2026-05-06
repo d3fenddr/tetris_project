@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +15,20 @@ from backend.app.schemas import LeaderboardItem, ScoreCreateRequest, ScoreRespon
 router = APIRouter(prefix="/scores", tags=["scores"])
 
 VALID_GAME_MODES = {"peaceful", "easy", "normal", "hard"}
+
+
+def _leaderboard_item(rank: int, row: Score) -> LeaderboardItem:
+    return LeaderboardItem(
+        rank=rank,
+        user_id=row.user_id,
+        nickname=row.nickname_at_submission or row.user.nickname,
+        score=row.score,
+        mode=row.mode,
+        lines=row.lines,
+        level=row.level,
+        season=row.season,
+        created_at=row.created_at,
+    )
 
 
 @router.post("", response_model=ScoreResponse, status_code=status.HTTP_201_CREATED)
@@ -86,34 +99,43 @@ def global_leaderboard(
 ) -> list[LeaderboardItem]:
     if settings.debug_online_score_flow:
         print(f"[score-flow] Backend leaderboard fetch: season={season}, mode={mode or 'all'}, limit={limit}")
+    clean_mode = mode.lower() if mode else "all"
     query = db.query(Score).filter(Score.season == season)
-    if mode and mode.lower() != "all":
-        clean_mode = mode.lower()
+    if clean_mode != "all":
         if clean_mode not in VALID_GAME_MODES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid leaderboard mode.")
         query = query.filter(Score.mode == clean_mode)
 
     try:
-        rows = query.order_by(desc(Score.score), Score.created_at.asc()).limit(limit).all()
+        candidate_rows = (
+            query.order_by(
+                Score.score.desc(),
+                Score.created_at.asc(),
+                Score.id.asc(),
+            )
+            .all()
+        )
     except SQLAlchemyError as exc:
         print(f"[score-flow] Backend leaderboard fetch failed: {exc.__class__.__name__}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Leaderboard database is temporarily unavailable. Please try again.",
         )
+
+    best_rows: list[Score] = []
+    seen_keys: set[tuple[int, str]] = set()
+    for row in candidate_rows:
+        key = (row.user_id, row.mode)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        best_rows.append(row)
+        if len(best_rows) >= limit:
+            break
+
     if settings.debug_online_score_flow:
-        print(f"[score-flow] Backend leaderboard rows: {len(rows)}")
-    return [
-        LeaderboardItem(
-            rank=idx,
-            nickname=row.nickname_at_submission or row.user.nickname,
-            score=row.score,
-            mode=row.mode,
-            lines=row.lines,
-            created_at=row.created_at,
-        )
-        for idx, row in enumerate(rows, start=1)
-    ]
+        print(f"[score-flow] Backend leaderboard rows: {len(best_rows)}")
+    return [_leaderboard_item(idx, row) for idx, row in enumerate(best_rows, start=1)]
 
 
 @router.get("/history/me", response_model=list[ScoreResponse])
@@ -154,18 +176,8 @@ def telegram_group_leaderboard(
     rows = (
         db.query(Score)
         .filter(Score.telegram_chat_id == chat_id, Score.season == season)
-        .order_by(desc(Score.score), Score.created_at.asc())
+        .order_by(Score.score.desc(), Score.created_at.asc(), Score.id.asc())
         .limit(limit)
         .all()
     )
-    return [
-        LeaderboardItem(
-            rank=idx,
-            nickname=row.nickname_at_submission or row.user.nickname,
-            score=row.score,
-            mode=row.mode,
-            lines=row.lines,
-            created_at=row.created_at,
-        )
-        for idx, row in enumerate(rows, start=1)
-    ]
+    return [_leaderboard_item(idx, row) for idx, row in enumerate(rows, start=1)]

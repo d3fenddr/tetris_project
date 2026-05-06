@@ -31,6 +31,8 @@ class AccountService:
         data["account"] = account.to_dict()
         self.session_service.save(data)
         self.backend_client.set_access_token(account.access_token)
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print("[score-flow] Account session save completed.")
 
     def _account_from_auth(self, nickname: str, auth: BackendAuth) -> AccountSession:
         user = auth.user or self.backend_client.get_current_user()
@@ -51,7 +53,26 @@ class AccountService:
     def register(self, nickname: str, password: str) -> AccountSession:
         if DEBUG_ONLINE_SCORE_FLOW:
             print("[score-flow] Auth action: register")
-        auth = self.backend_client.register(nickname, password)
+        try:
+            auth = self.backend_client.register(nickname, password)
+        except BackendClientError as exc:
+            if not exc.is_unavailable:
+                raise
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print("[score-flow] Register uncertain, attempting one login recovery.")
+            try:
+                auth = self.backend_client.login(nickname, password)
+                if DEBUG_ONLINE_SCORE_FLOW:
+                    print("[score-flow] Register uncertain, login recovery succeeded.")
+            except BackendClientError as login_exc:
+                if DEBUG_ONLINE_SCORE_FLOW:
+                    print(f"[score-flow] Register recovery failed: {login_exc.error_type}")
+                if login_exc.is_unavailable:
+                    raise BackendClientError(
+                        "Backend is unavailable. Registration may have completed. Try Login.",
+                        error_type="network",
+                    ) from login_exc
+                raise login_exc
         return self._account_from_auth(nickname, auth)
 
     def login(self, nickname: str, password: str) -> AccountSession:
