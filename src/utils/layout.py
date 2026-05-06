@@ -54,8 +54,8 @@ def initial_window_size() -> tuple[int, int]:
     except pygame.error:
         return DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
 
-    width = int(display_width * MAX_WINDOW_WIDTH_RATIO) if display_width else DEFAULT_WINDOW_WIDTH
-    height = int(display_height * MAX_WINDOW_HEIGHT_RATIO) if display_height else DEFAULT_WINDOW_HEIGHT
+    width = min(DEFAULT_WINDOW_WIDTH, int(display_width * MAX_WINDOW_WIDTH_RATIO)) if display_width else DEFAULT_WINDOW_WIDTH
+    height = min(DEFAULT_WINDOW_HEIGHT, int(display_height * MAX_WINDOW_HEIGHT_RATIO)) if display_height else DEFAULT_WINDOW_HEIGHT
     return clamp_window_size(width, height)
 
 

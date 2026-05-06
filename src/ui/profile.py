@@ -23,6 +23,8 @@ from src.config import (
     PANEL_BORDER,
     PROFILE_PANEL_MAX_WIDTH,
     RED,
+    UI_SCALE_MAX,
+    UI_SCALE_MIN,
     WHITE,
 )
 from src.services.account_service import AccountService
@@ -76,6 +78,14 @@ def _enable_text_key_repeat() -> None:
 
 def _disable_text_key_repeat() -> None:
     pygame.key.set_repeat(0)
+
+
+def _auth_scale(screen: pygame.Surface) -> float:
+    return max(UI_SCALE_MIN, min(UI_SCALE_MAX, screen.get_height() / 750))
+
+
+def _scaled(value: int, scale: float, minimum: int) -> int:
+    return max(minimum, int(value * scale))
 
 
 def _format_profile_date(value: object) -> str:
@@ -258,50 +268,98 @@ def account_startup_screen(
             except queue.Empty:
                 pass
 
-        screen.fill(BLACK)
-        draw_text_shadow(screen, "SEASON 2 ACCOUNT", 36, WHITE, screen.get_width() // 2, 76)
+        height = screen.get_height()
+        scale = _auth_scale(screen)
+        top_margin = _scaled(18, scale, 12)
+        bottom_margin = _scaled(18, scale, 12)
+        title_font = _scaled(36, scale, 26)
+        tab_font = _scaled(20, scale, 15)
+        hint_font = _scaled(15, scale, 12)
+        label_font = _scaled(16, scale, 12)
+        input_font = _scaled(22, scale, 16)
+        button_font = _scaled(MENU_BUTTON_FONT_SIZE, scale, 17)
+        message_font = _scaled(14, scale, 11)
+        footer_font = _scaled(14, scale, 10)
+        tab_height = _scaled(42, scale, 30)
+        input_height = _scaled(42, scale, 32)
+        button_height = _scaled(MENU_BUTTON_HEIGHT, scale, 32)
+        panel_padding_x = _scaled(28, scale, 18)
+        panel_padding_top = _scaled(28, scale, 18)
+        gap_after_tabs = _scaled(24, scale, 14)
+        field_gap = _scaled(32, scale, 20)
+        gap_before_button = _scaled(24, scale, 16)
+        title_block = _scaled(74, scale, 48)
+        message_area = _scaled(64, scale, 44)
+        footer_area = _scaled(24, scale, 18)
+        panel_height = (
+            panel_padding_top
+            + tab_height
+            + gap_after_tabs
+            + _scaled(20, scale, 14)
+            + field_gap
+            + input_height * 2
+            + gap_before_button
+            + button_height
+            + _scaled(22, scale, 12)
+        )
+        available_height = max(1, height - top_margin - bottom_margin)
+        total_height = title_block + panel_height + message_area + footer_area
+        if total_height > available_height:
+            overflow = total_height - available_height
+            panel_height = max(_scaled(300, scale, 276), panel_height - overflow)
+            total_height = title_block + panel_height + message_area + footer_area
+        start_y = max(top_margin, (height - total_height) // 2)
+        title_y = start_y + _scaled(28, scale, 22)
+        panel_y = start_y + title_block
 
-        panel = content_rect(screen, FORM_MAX_WIDTH, 380, y=132)
+        screen.fill(BLACK)
+        draw_text_shadow(screen, "Season 2", title_font, WHITE, screen.get_width() // 2, title_y)
+
+        panel = content_rect(screen, FORM_MAX_WIDTH, panel_height, y=panel_y, min_margin=18)
         draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
-        tab_width = (panel.width - 68) // 2
-        login_tab = pygame.Rect(panel.x + 28, panel.y + 28, tab_width, 42)
-        register_tab = pygame.Rect(login_tab.right + 12, panel.y + 28, tab_width, 42)
+        tab_width = (panel.width - panel_padding_x * 2 - _scaled(12, scale, 8)) // 2
+        login_tab = pygame.Rect(panel.x + panel_padding_x, panel.y + panel_padding_top, tab_width, tab_height)
+        register_tab = pygame.Rect(login_tab.right + _scaled(12, scale, 8), panel.y + panel_padding_top, tab_width, tab_height)
         mouse_pos = pygame.mouse.get_pos()
-        draw_button(screen, login_tab, "Login", 20, hovered=login_tab.collidepoint(mouse_pos), selected=mode == "login")
+        draw_button(screen, login_tab, "Login", tab_font, hovered=login_tab.collidepoint(mouse_pos), selected=mode == "login")
         draw_button(
             screen,
             register_tab,
             "Register",
-            20,
+            tab_font,
             hovered=register_tab.collidepoint(mouse_pos),
             selected=mode == "register",
         )
-        hint = "Use your existing Season 2 account." if mode == "login" else "Create a new Season 2 account."
-        draw_text(screen, hint, 15, MUTED_TEXT, panel.centerx, panel.y + 94)
-
+        hint_y = login_tab.bottom + _scaled(20, scale, 12)
+        first_field_y = hint_y + _scaled(46, scale, 34)
+        second_field_y = first_field_y + input_height + field_gap
         fields = [
-            ("nickname", "Nickname", nickname, False, panel.y + 155),
-            ("password", "Password", password, True, panel.y + 229),
+            ("nickname", "Nickname", nickname, False, first_field_y),
+            ("password", "Password", password, True, second_field_y),
         ]
         field_rects: list[tuple[str, pygame.Rect]] = []
+
+        label_gap_above_input = _scaled(36, scale, 28)
+
         for field_name, label, value, hidden, y in fields:
-            draw_text(screen, label, 16, MUTED_TEXT, panel.centerx, y - 31)
-            rect = pygame.Rect(panel.x + 28, y - 18, panel.width - 56, 42)
+            draw_text(screen, label, label_font, MUTED_TEXT, panel.centerx, y - label_gap_above_input)
+            rect = pygame.Rect(panel.x + panel_padding_x, y - input_height // 2, panel.width - panel_padding_x * 2, input_height)
             selected = active_field == field_name
             pygame.draw.rect(screen, (18, 20, 28), rect, border_radius=7)
             pygame.draw.rect(screen, RED if selected else PANEL_BORDER, rect, width=1, border_radius=7)
             display = "*" * len(value) if hidden else value
-            draw_text(screen, display or "_", 22, WHITE, rect.centerx, rect.centery)
+            draw_text(screen, display or "_", input_font, WHITE, rect.centerx, rect.centery)
             field_rects.append((field_name, rect))
 
         button_rect = pygame.Rect(0, 0, MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT)
+        button_rect.height = button_height
         button_rect.width = min(MENU_BUTTON_WIDTH, panel.width - 70)
-        button_rect.center = (screen.get_width() // 2, panel.y + 306)
+        button_rect.center = (screen.get_width() // 2, min(panel.bottom - button_height // 2 - _scaled(20, scale, 12), second_field_y + input_height // 2 + gap_before_button + button_height // 2))
         draw_button(
             screen,
             button_rect,
             "Login" if mode == "login" else "Create Account",
-            MENU_BUTTON_FONT_SIZE,
+            button_font,
             hovered=button_rect.collidepoint(mouse_pos),
             selected=True,
             enabled=not loading,
@@ -309,11 +367,11 @@ def account_startup_screen(
 
         for idx, line in enumerate(_wrap_message(message)):
             color = RED if "wrong" in message.lower() or "not found" in message.lower() or "unavailable" in message.lower() or "already" in message.lower() else MUTED_TEXT
-            draw_text(screen, line, 14, color, screen.get_width() // 2, panel.bottom + 28 + idx * 18)
+            draw_text(screen, line, message_font, color, screen.get_width() // 2, panel.bottom + _scaled(18, scale, 12) + idx * _scaled(16, scale, 12))
         if loading:
-            draw_text(screen, "Please wait...", 18, WHITE, screen.get_width() // 2, panel.bottom + 96)
+            draw_text(screen, "Please wait...", _scaled(18, scale, 13), WHITE, screen.get_width() // 2, min(height - bottom_margin, panel.bottom + message_area))
         else:
-            draw_text(screen, "Use the Exit button from the main menu to quit", 14, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 30)
+            draw_text(screen, "Use Exit from the main menu to quit", footer_font, MUTED_TEXT, screen.get_width() // 2, height - _scaled(18, scale, 12))
 
         pygame.display.update()
         clock.tick(FPS)
@@ -482,7 +540,6 @@ def profile_screen(
             name_rect = draw_text(screen, nickname, 26, WHITE, summary.centerx, summary.y + 34)
             if reward is not None:
                 draw_medal_badge(screen, reward, name_rect.right + 22, summary.y + 34, 13)
-            draw_text(screen, "Season 2 Account", 15, MUTED_TEXT, summary.centerx, summary.y + 62)
             if profile:
                 rows = [
                     ("Season 1 Medal", reward.medal.title() if reward else "-"),
