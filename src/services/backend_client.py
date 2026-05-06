@@ -46,7 +46,11 @@ class BackendClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         should_log = DEBUG_ONLINE_SCORE_FLOW and (
-            path.startswith("/scores") or path.startswith("/auth/me")
+            path.startswith("/scores")
+            or path.startswith("/auth/me")
+            or path.startswith("/auth/login")
+            or path.startswith("/auth/register")
+            or path.startswith("/auth/enter")
         )
         try:
             response = self.session.request(
@@ -81,24 +85,43 @@ class BackendClient:
         except ValueError:
             return None
 
-    def register(self, nickname: str, password: str) -> Dict[str, Any]:
-        return self._request("POST", "/auth/register", json={"nickname": nickname, "password": password})
+    def register(self, nickname: str, password: str) -> BackendAuth:
+        data = self._request("POST", "/auth/register", json={"nickname": nickname, "password": password})
+        auth = self._auth_from_response(data, default_created=True)
+        self.set_access_token(auth.access_token)
+        return auth
 
     def login(self, nickname: str, password: str) -> BackendAuth:
         data = self._request("POST", "/auth/login", json={"nickname": nickname, "password": password})
-        auth = BackendAuth(access_token=str(data["access_token"]), refresh_token=str(data["refresh_token"]))
+        auth = self._auth_from_response(data, default_created=False)
         self.set_access_token(auth.access_token)
         return auth
 
     def authenticate_or_register(self, nickname: str, password: str) -> BackendAuth:
         data = self._request("POST", "/auth/enter", json={"nickname": nickname, "password": password})
-        auth = BackendAuth(
-            access_token=str(data["access_token"]),
-            refresh_token=str(data["refresh_token"]),
-            created=bool(data.get("created", False)),
-            user=data.get("user") if isinstance(data.get("user"), dict) else None,
-        )
+        auth = self._auth_from_response(data, default_created=bool(data.get("created", False)) if isinstance(data, dict) else False)
         self.set_access_token(auth.access_token)
+        return auth
+
+    def _auth_from_response(self, data: Any, default_created: bool = False) -> BackendAuth:
+        if not isinstance(data, dict):
+            raise BackendClientError("Unexpected auth response from backend.")
+        access_token = data.get("access_token")
+        refresh_token = data.get("refresh_token")
+        user = data.get("user") if isinstance(data.get("user"), dict) else None
+        if not access_token or not refresh_token:
+            raise BackendClientError("Backend auth response did not include tokens.")
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(
+                "[score-flow] Auth response parsed: "
+                f"access_token=yes, refresh_token=yes, user={'yes' if user else 'no'}"
+            )
+        auth = BackendAuth(
+            access_token=str(access_token),
+            refresh_token=str(refresh_token),
+            created=bool(data.get("created", default_created)),
+            user=user,
+        )
         return auth
 
     def logout(self, refresh_token: str) -> None:

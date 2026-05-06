@@ -51,9 +51,13 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
-class EnterResponse(TokenPairResponse):
+class AuthResponse(TokenPairResponse):
     created: bool = False
     user: UserResponse
+
+
+class EnterResponse(AuthResponse):
+    pass
 
 
 class NicknameChangeResponse(BaseModel):

@@ -4,6 +4,7 @@ from typing import Optional
 
 from src.state import AccountSession
 from src.services.session_service import SessionService
+from src.config import DEBUG_ONLINE_SCORE_FLOW
 from src.services.backend_client import BackendAuth, BackendClient, BackendClientError
 
 
@@ -31,23 +32,7 @@ class AccountService:
         self.session_service.save(data)
         self.backend_client.set_access_token(account.access_token)
 
-    def register(self, nickname: str, password: str) -> None:
-        self.backend_client.register(nickname, password)
-
-    def login(self, nickname: str, password: str) -> AccountSession:
-        auth: BackendAuth = self.backend_client.login(nickname, password)
-        user = self.backend_client.get_current_user()
-        account = AccountSession(
-            username=str(user.get("nickname", nickname)),
-            user_id=int(user.get("id")) if user.get("id") is not None else None,
-            access_token=auth.access_token,
-            refresh_token=auth.refresh_token,
-        )
-        self.save_account(account)
-        return account
-
-    def authenticate_or_register(self, nickname: str, password: str) -> tuple[AccountSession, bool]:
-        auth = self.backend_client.authenticate_or_register(nickname, password)
+    def _account_from_auth(self, nickname: str, auth: BackendAuth) -> AccountSession:
         user = auth.user or self.backend_client.get_current_user()
         account = AccountSession(
             username=str(user.get("nickname", nickname)),
@@ -56,6 +41,28 @@ class AccountService:
             refresh_token=auth.refresh_token,
         )
         self.save_account(account)
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print(
+                "[score-flow] Account session saved: "
+                f"user={account.username}, user_id={account.user_id}, authenticated={bool(account.access_token)}"
+            )
+        return account
+
+    def register(self, nickname: str, password: str) -> AccountSession:
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print("[score-flow] Auth action: register")
+        auth = self.backend_client.register(nickname, password)
+        return self._account_from_auth(nickname, auth)
+
+    def login(self, nickname: str, password: str) -> AccountSession:
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print("[score-flow] Auth action: login")
+        auth: BackendAuth = self.backend_client.login(nickname, password)
+        return self._account_from_auth(nickname, auth)
+
+    def authenticate_or_register(self, nickname: str, password: str) -> tuple[AccountSession, bool]:
+        auth = self.backend_client.authenticate_or_register(nickname, password)
+        account = self._account_from_auth(nickname, auth)
         return account, auth.created
 
     def refresh_current_user(self) -> Optional[dict]:

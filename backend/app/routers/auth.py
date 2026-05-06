@@ -13,6 +13,7 @@ from backend.app.dependencies import get_current_user
 from backend.app.models import RefreshSession, Score, User
 from backend.app.nicknames import validate_available_nickname, validate_nickname_format, normalize_nickname
 from backend.app.schemas import (
+    AuthResponse,
     ChangeNicknameRequest,
     EnterRequest,
     EnterResponse,
@@ -80,8 +81,19 @@ def _token_pair_for_user(db: Session, user: User) -> TokenPairResponse:
     return TokenPairResponse(access_token=access_token, refresh_token=refresh_token)
 
 
-@router.post("/register", response_model=UserResponse)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> UserResponse:
+def _auth_response_for_user(db: Session, user: User, created: bool = False) -> AuthResponse:
+    tokens = _token_pair_for_user(db, user)
+    db.refresh(user)
+    return AuthResponse(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        created=created,
+        user=_user_response(db, user),
+    )
+
+
+@router.post("/register", response_model=AuthResponse)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
     try:
         nickname, normalized = validate_available_nickname(db, payload.nickname)
     except ValueError as exc:
@@ -96,11 +108,11 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> UserRes
     db.add(user)
     db.commit()
     db.refresh(user)
-    return _user_response(db, user)
+    return _auth_response_for_user(db, user, created=True)
 
 
-@router.post("/login", response_model=TokenPairResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenPairResponse:
+@router.post("/login", response_model=AuthResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     try:
         clean_nickname = validate_nickname_format(payload.nickname)
     except ValueError:
@@ -108,10 +120,12 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenPairResp
 
     normalized = normalize_nickname(clean_nickname)
     user = db.query(User).filter(User.normalized_nickname == normalized).first()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found. Register first.")
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong password.")
 
-    return _token_pair_for_user(db, user)
+    return _auth_response_for_user(db, user, created=False)
 
 
 @router.post("/enter", response_model=EnterResponse)
@@ -145,14 +159,8 @@ def enter(payload: EnterRequest, db: Session = Depends(get_db)) -> EnterResponse
             db.refresh(user)
             created = True
 
-        tokens = _token_pair_for_user(db, user)
-        db.refresh(user)
-        return EnterResponse(
-            access_token=tokens.access_token,
-            refresh_token=tokens.refresh_token,
-            created=created,
-            user=_user_response(db, user),
-        )
+        auth_response = _auth_response_for_user(db, user, created=created)
+        return EnterResponse(**auth_response.model_dump())
     except HTTPException:
         raise
     except SQLAlchemyError as exc:

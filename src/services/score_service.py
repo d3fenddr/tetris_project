@@ -30,16 +30,28 @@ class ScoreService:
         self.backend_client = backend_client
 
     def _load_access_token(self) -> str | None:
+        if self.backend_client.access_token:
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print("[score-flow] Score token source: memory")
+            return self.backend_client.access_token
         raw = self.session_service.load().get("account")
         if not isinstance(raw, dict):
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print("[score-flow] Score token source: none")
             return None
         token = raw.get("access_token")
-        return str(token) if token else None
+        if token:
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print("[score-flow] Score token source: session")
+            return str(token)
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print("[score-flow] Score token source: none")
+        return None
 
     def _require_backend_auth(self) -> None:
         token = self._load_access_token()
         if not token:
-            raise BackendClientError("Log in to submit Season 2 scores.")
+            raise BackendClientError("not logged in.")
         self.backend_client.set_access_token(token)
 
     def record_score(self, player_name: str, score: int, mode: str = "normal", lines: int = 0, level: int = 1) -> bool:
