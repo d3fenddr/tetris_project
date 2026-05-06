@@ -34,7 +34,7 @@ def _postgres_connect_args(database_url: str) -> dict:
 def _engine_kwargs(database_url: str) -> tuple[str, dict]:
     kwargs: dict = {"future": True}
     if _is_sqlite_url(database_url):
-        kwargs["connect_args"] = {"check_same_thread": False}
+        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 15}
         return database_url, kwargs
 
     if _is_postgres_url(database_url):
@@ -64,6 +64,11 @@ def _column_type(sqlite_type: str, postgres_type: str) -> str:
 
 def ensure_schema() -> None:
     """Small compatibility sync for existing databases without migrations."""
+    if _is_sqlite_url(settings.database_url):
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA journal_mode=WAL"))
+            connection.execute(text("PRAGMA busy_timeout=15000"))
+
     inspector = inspect(engine)
     if "users" in inspector.get_table_names():
         user_columns = {column["name"] for column in inspector.get_columns("users")}

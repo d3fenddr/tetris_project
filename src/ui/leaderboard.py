@@ -23,7 +23,9 @@ from src.config import (
     WHITE,
 )
 from src.game.modes import game_mode_label
+from src.services.rewards import SEASON_1_REWARDS, season_1_reward_for
 from src.services.score_service import ScoreService
+from src.ui.reward_badges import draw_medal_badge
 from src.utils.layout import content_rect, handle_resize_event
 from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
 
@@ -35,6 +37,12 @@ LEADERBOARD_TABS = [
     ("normal", "Normal"),
     ("hard", "Hard"),
 ]
+
+MEDAL_COLORS = {
+    "gold": GOLD,
+    "silver": SILVER,
+    "bronze": BRONZE,
+}
 
 
 def _load_leaderboard_worker(
@@ -54,8 +62,7 @@ def _load_season1_worker(
     score_service: ScoreService,
 ) -> None:
     try:
-        leaderboard = score_service.get_season1_top3()
-        output.put((True, leaderboard, ""))
+        output.put((True, score_service.get_season1_top3(), ""))
     except Exception as exc:
         output.put((False, [], str(exc)))
 
@@ -140,7 +147,10 @@ def show_leaderboard(
                 lines = int(row.get("lines", 0))
                 row_rect = content_rect(screen, LEADERBOARD_PANEL_MAX_WIDTH, 43, y=y - 22)
                 draw_panel(screen, row_rect, PANEL_BG, PANEL_BORDER, radius=7)
-                draw_text(screen, f"{rank}. {nickname}", 18, color, row_rect.x + 72, y - 5)
+                name_rect = draw_text(screen, f"{rank}. {nickname}", 18, color, row_rect.x + 118, y - 5)
+                reward = season_1_reward_for(nickname)
+                if reward is not None:
+                    draw_medal_badge(screen, reward, min(name_rect.right + 18, row_rect.centerx - 36), y - 5, 10)
                 draw_text(screen, str(score), 18, WHITE, row_rect.right - 54, y - 5)
                 mode_label = game_mode_label(mode) if mode else "Unknown"
                 draw_text(screen, f"{mode_label} | lines {lines}", 12, MUTED_TEXT, row_rect.centerx, y + 13)
@@ -203,29 +213,29 @@ def show_season1_top3(
 
         screen.fill(BLACK)
         draw_text_shadow(screen, "SEASON 1 WINNERS", 34, WHITE, screen.get_width() // 2, 56)
-        draw_text(screen, "Archived Google leaderboard", 17, MUTED_TEXT, screen.get_width() // 2, 94)
 
         if loading:
-            draw_text(screen, "Loading archived winners...", 24, WHITE, screen.get_width() // 2, 180)
+            draw_text(screen, "Loading winners...", 24, WHITE, screen.get_width() // 2, 180)
         elif load_error and not winners:
             panel = content_rect(screen, SEASON1_PANEL_MAX_WIDTH, 190, y=150)
             draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
             draw_text(screen, "Season 1 leaderboard is unavailable right now.", 18, RED, panel.centerx, panel.centery)
         else:
-            labels = ["1st", "2nd", "3rd"]
-            podium = [
-                winners[idx] if idx < len(winners) else ("No player recorded", (0, ""))
-                for idx in range(3)
-            ]
-            for idx, (name, (score, _date)) in enumerate(podium):
-                y = 165 + idx * 92
+            for idx, reward in enumerate(SEASON_1_REWARDS):
+                y = 155 + idx * 92
                 rect = content_rect(screen, SEASON1_PANEL_MAX_WIDTH, 72, y=y - 32)
                 draw_panel(screen, rect, PANEL_BG, PANEL_BORDER)
-                draw_text(screen, labels[idx], 23, colors[idx], screen.get_width() // 2, y - 9)
-                text = f"{name}: {score}" if score else name
-                draw_text(screen, text, 21, WHITE, screen.get_width() // 2, y + 18)
+                font = pygame.font.SysFont("comicsans", 22)
+                text_width = font.size(reward.username)[0]
+                medal_radius = 15
+                gap = 28
+                total_width = medal_radius * 2 + gap + text_width
+                medal_x = rect.centerx - total_width // 2 + medal_radius
+                text_center_x = medal_x + medal_radius + gap + text_width // 2
+                medal_color = MEDAL_COLORS.get(reward.medal, colors[idx])
+                draw_medal_badge(screen, reward, medal_x, rect.centery, medal_radius)
+                draw_text(screen, reward.username, 22, medal_color, text_center_x, rect.centery)
 
-        draw_text(screen, "Season 2 uses the online database leaderboard.", 15, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 54)
         draw_text(screen, "ESC to return", 20, GRAY, screen.get_width() // 2, screen.get_height() - 20)
         pygame.display.update()
         clock.tick(FPS)

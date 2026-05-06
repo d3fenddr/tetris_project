@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+import time
 
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -15,6 +16,8 @@ from backend.app.schemas import LeaderboardItem, ScoreCreateRequest, ScoreRespon
 router = APIRouter(prefix="/scores", tags=["scores"])
 
 VALID_GAME_MODES = {"peaceful", "easy", "normal", "hard"}
+SCORE_WRITE_RETRIES = 2
+SCORE_WRITE_BACKOFF_SECONDS = 0.25
 
 
 def _leaderboard_item(rank: int, row: Score) -> LeaderboardItem:
@@ -67,27 +70,49 @@ def create_score(
     current_user.best_score = max(current_user.best_score or 0, payload.score)
     current_user.updated_at = datetime.utcnow()
     db.add(score)
-    try:
-        db.commit()
-        db.refresh(score)
-        if settings.debug_online_score_flow:
-            print(f"[score-flow] Backend score saved: id={score.id}, user_id={current_user.id}")
-        return score
-    except IntegrityError:
-        db.rollback()
-        if settings.debug_online_score_flow:
-            print(f"[score-flow] Backend duplicate score submission: user_id={current_user.id}")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Duplicate score submission for this game session.",
-        )
-    except SQLAlchemyError as exc:
-        db.rollback()
-        print(f"[score-flow] Backend score save failed: {exc.__class__.__name__}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Score database is temporarily unavailable. Please try again.",
-        )
+    for attempt in range(SCORE_WRITE_RETRIES + 1):
+        try:
+            db.commit()
+            db.refresh(score)
+            if settings.debug_online_score_flow:
+                print(f"[score-flow] Backend score saved: id={score.id}, user_id={current_user.id}")
+            return score
+        except IntegrityError:
+            db.rollback()
+            if settings.debug_online_score_flow:
+                print(f"[score-flow] Backend duplicate score submission: user_id={current_user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Duplicate score submission for this game session.",
+            )
+        except OperationalError as exc:
+            db.rollback()
+            if attempt < SCORE_WRITE_RETRIES:
+                if settings.debug_online_score_flow:
+                    print(
+                        "[score-flow] Backend score save transient failure: "
+                        f"{exc.__class__.__name__}, retry {attempt + 1}/{SCORE_WRITE_RETRIES}"
+                    )
+                time.sleep(SCORE_WRITE_BACKOFF_SECONDS * (attempt + 1))
+                db.add(score)
+                continue
+            print(f"[score-flow] Backend score save failed after retries: {exc.__class__.__name__}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Score database is temporarily unavailable. Please try again.",
+            )
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print(f"[score-flow] Backend score save failed: {exc.__class__.__name__}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Score database is temporarily unavailable. Please try again.",
+            )
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Score database is temporarily unavailable. Please try again.",
+    )
 
 
 @router.get("/leaderboard", response_model=list[LeaderboardItem])

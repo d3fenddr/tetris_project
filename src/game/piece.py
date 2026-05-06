@@ -49,9 +49,53 @@ class Piece:
     def rotate(self, grid: list[list[int]], cols: int, rows: int) -> None:
         new_shape = [list(row) for row in zip(*self.shape[::-1])]
         old_shape = self.shape
+        old_x = self.x
+        old_y = self.y
         self.shape = new_shape
-        if not self.valid_move(0, 0, grid, cols, rows):
-            self.shape = old_shape
+        for kick_x, kick_y in ((0, 0), (-1, 0), (1, 0), (-2, 0), (2, 0), (0, -1)):
+            self.x = old_x + kick_x
+            self.y = old_y + kick_y
+            if self.valid_move(0, 0, grid, cols, rows):
+                return
+        self.shape = old_shape
+        self.x = old_x
+        self.y = old_y
+
+    def draw_preview(
+        self,
+        screen: pygame.Surface,
+        block_size: int,
+        preview_rect: pygame.Rect,
+        border_color: tuple[int, int, int],
+    ) -> None:
+        occupied = [
+            (j, i)
+            for i, row in enumerate(self.shape)
+            for j, cell in enumerate(row)
+            if cell
+        ]
+        if not occupied:
+            return
+        min_x = min(x for x, _y in occupied)
+        max_x = max(x for x, _y in occupied)
+        min_y = min(y for _x, y in occupied)
+        max_y = max(y for _x, y in occupied)
+        shape_width = (max_x - min_x + 1) * block_size
+        shape_height = (max_y - min_y + 1) * block_size
+        start_x = preview_rect.x + (preview_rect.width - shape_width) // 2
+        start_y = preview_rect.y + (preview_rect.height - shape_height) // 2
+        for i, row in enumerate(self.shape):
+            for j, cell in enumerate(row):
+                if not cell:
+                    continue
+                rect = pygame.Rect(
+                    start_x + (j - min_x) * block_size,
+                    start_y + (i - min_y) * block_size,
+                    block_size,
+                    block_size,
+                )
+                pygame.draw.rect(screen, self.color, rect)
+                pygame.draw.rect(screen, border_color, rect, 1)
 
     def draw(
         self,

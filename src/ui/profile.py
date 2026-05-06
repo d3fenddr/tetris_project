@@ -13,6 +13,8 @@ from src.config import (
     FORM_MAX_WIDTH,
     FPS,
     GRAY,
+    KEY_REPEAT_INITIAL_DELAY_MS,
+    KEY_REPEAT_MOVE_INTERVAL_MS,
     MENU_BUTTON_FONT_SIZE,
     MENU_BUTTON_HEIGHT,
     MENU_BUTTON_WIDTH,
@@ -25,7 +27,9 @@ from src.config import (
 )
 from src.services.account_service import AccountService
 from src.services.backend_client import BackendClientError
+from src.services.rewards import season_1_reward_for
 from src.state import AppState
+from src.ui.reward_badges import draw_medal_badge
 from src.utils.layout import content_rect, handle_resize_event
 from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
 
@@ -44,6 +48,34 @@ def _wrap_message(message: str, width: int = 38) -> list[str]:
     if current:
         lines.append(current)
     return lines[:3]
+
+
+def normalize_auth_error(error: object) -> str:
+    raw = str(error or "").strip()
+    lowered = raw.lower()
+    if "password" in lowered and ("string_too_short" in lowered or "at least 6" in lowered or "min_length" in lowered):
+        return "Password must be at least 6 characters."
+    if "nickname" in lowered and ("string_too_short" in lowered or "at least 3" in lowered):
+        return "Nickname must be at least 3 characters."
+    if "already" in lowered or "taken" in lowered:
+        return "This nickname is already taken."
+    if "wrong" in lowered or "incorrect" in lowered or "invalid" in lowered:
+        return "Nickname or password is incorrect."
+    if "not found" in lowered:
+        return "Account was not found."
+    if "unavailable" in lowered or "timed out" in lowered:
+        return "Account service is temporarily unavailable."
+    if "[score-flow]" in raw or raw.startswith("[") or "{'" in raw or '"detail"' in raw:
+        return "Something went wrong. Please try again."
+    return raw or "Something went wrong. Please try again."
+
+
+def _enable_text_key_repeat() -> None:
+    pygame.key.set_repeat(KEY_REPEAT_INITIAL_DELAY_MS, KEY_REPEAT_MOVE_INTERVAL_MS)
+
+
+def _disable_text_key_repeat() -> None:
+    pygame.key.set_repeat(0)
 
 
 def _format_profile_date(value: object) -> str:
@@ -113,6 +145,7 @@ def _prompt_text(
     hidden: bool = False,
 ) -> str | None:
     value = ""
+    _enable_text_key_repeat()
     while True:
         screen.fill(BLACK)
         panel = content_rect(screen, FORM_MAX_WIDTH, 260, y=92)
@@ -133,8 +166,10 @@ def _prompt_text(
                 continue
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
+                    _disable_text_key_repeat()
                     return None
                 if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    _disable_text_key_repeat()
                     return value.strip()
                 if event.key == pygame.K_BACKSPACE:
                     value = value[:-1]
@@ -175,7 +210,7 @@ def account_startup_screen(
     account_service: AccountService,
     persist_state: Callable[[], None],
 ) -> None:
-    nickname = state.account.username if state.account else state.player_name
+    nickname = state.account.username if state.account else ""
     password = ""
     mode = "login"
     active_field = "nickname"
@@ -183,6 +218,7 @@ def account_startup_screen(
     loading = False
     result_queue: "queue.Queue[tuple[bool, str, object]]" = queue.Queue()
     last_click_ms = 0
+    _enable_text_key_repeat()
 
     def start_auth() -> None:
         nonlocal loading, message
@@ -201,7 +237,8 @@ def account_startup_screen(
                     account = account_service.login(clean_nickname, password)
                 result_queue.put((True, "Account created." if mode == "register" else "Logged in.", account))
             except BackendClientError as exc:
-                result_queue.put((False, str(exc), None))
+                print(f"[auth-flow] Auth failed: {exc}")
+                result_queue.put((False, normalize_auth_error(exc), None))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -215,8 +252,9 @@ def account_startup_screen(
                     if state.account:
                         state.player_name = state.account.username
                     persist_state()
+                    _disable_text_key_repeat()
                     return
-                message = result_message or "Backend is unavailable. Online account and leaderboard require connection."
+                message = normalize_auth_error(result_message)
             except queue.Empty:
                 pass
 
@@ -275,7 +313,7 @@ def account_startup_screen(
         if loading:
             draw_text(screen, "Please wait...", 18, WHITE, screen.get_width() // 2, panel.bottom + 96)
         else:
-            draw_text(screen, "ESC exits", 16, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 30)
+            draw_text(screen, "Use the Exit button from the main menu to quit", 14, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 30)
 
         pygame.display.update()
         clock.tick(FPS)
@@ -308,7 +346,7 @@ def account_startup_screen(
                         start_auth()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    raise SystemExit
+                    continue
                 if event.key == pygame.K_TAB:
                     active_field = "password" if active_field == "nickname" else "nickname"
                     continue
@@ -338,14 +376,18 @@ def _confirm(
     title: str,
     message: str,
 ) -> bool:
+    selected = 1
     while True:
         screen.fill(BLACK)
         panel = content_rect(screen, FORM_MAX_WIDTH, 250, y=105)
         draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
         draw_text(screen, title, 26, WHITE, panel.centerx, panel.y + 42)
         draw_text(screen, message[:44], 17, GRAY, panel.centerx, panel.y + 105)
-        draw_text(screen, "Y / ENTER: yes", 20, WHITE, panel.centerx, panel.y + 178)
-        draw_text(screen, "ESC: no", 20, GRAY, panel.centerx, panel.y + 218)
+        mouse_pos = pygame.mouse.get_pos()
+        yes_rect = pygame.Rect(panel.centerx - 142, panel.y + 158, 120, 42)
+        no_rect = pygame.Rect(panel.centerx + 22, panel.y + 158, 120, 42)
+        draw_button(screen, yes_rect, "Yes", 20, hovered=yes_rect.collidepoint(mouse_pos), selected=selected == 0)
+        draw_button(screen, no_rect, "No", 20, hovered=no_rect.collidepoint(mouse_pos), selected=selected == 1)
         pygame.display.update()
         clock.tick(FPS)
         for event in pygame.event.get():
@@ -355,9 +397,18 @@ def _confirm(
                 screen = handle_resize_event(event)
                 continue
             if event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+                if event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_TAB):
+                    selected = 1 - selected
+                elif event.key == pygame.K_y:
                     return True
-                if event.key == pygame.K_ESCAPE:
+                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    return selected == 0
+                elif event.key in (pygame.K_ESCAPE, pygame.K_n):
+                    return False
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if yes_rect.collidepoint(event.pos):
+                    return True
+                if no_rect.collidepoint(event.pos):
                     return False
 
 
@@ -385,7 +436,8 @@ def _login_or_register(
         persist_state()
         _message_screen(screen, clock, "Account ready", f"Logged in as {account.username}.")
     except BackendClientError as exc:
-        _message_screen(screen, clock, "Account error", str(exc))
+        print(f"[auth-flow] Account error: {exc}")
+        _message_screen(screen, clock, "Account error", normalize_auth_error(exc))
 
 
 def profile_screen(
@@ -414,7 +466,7 @@ def profile_screen(
                 state.player_name = state.account.username
                 persist_state()
         else:
-            profile_error = error or "Could not refresh profile."
+            profile_error = normalize_auth_error(error or "Could not refresh profile.")
 
     while True:
         screen.fill(BLACK)
@@ -424,22 +476,24 @@ def profile_screen(
 
         if logged_in:
             nickname = state.account.username if state.account else ""
+            reward = season_1_reward_for(nickname)
             summary = content_rect(screen, PROFILE_PANEL_MAX_WIDTH, 240, y=92)
             draw_panel(screen, summary, PANEL_BG, PANEL_BORDER)
-            draw_text(screen, nickname, 26, WHITE, summary.centerx, summary.y + 34)
+            name_rect = draw_text(screen, nickname, 26, WHITE, summary.centerx, summary.y + 34)
+            if reward is not None:
+                draw_medal_badge(screen, reward, name_rect.right + 22, summary.y + 34, 13)
             draw_text(screen, "Season 2 Account", 15, MUTED_TEXT, summary.centerx, summary.y + 62)
             if profile:
                 rows = [
-                    ("User ID", str(profile.get("id", state.account.user_id or "-"))),
+                    ("Season 1 Medal", reward.medal.title() if reward else "-"),
                     ("Best Score", str(profile.get("best_score", 0))),
                     ("Games Played", str(profile.get("games_played", 0))),
                     ("Season Rank", str(profile.get("current_season_rank") or "Unranked")),
                     ("Joined", _format_profile_date(profile.get("created_at"))),
-                    ("Last Login", _format_profile_date(profile.get("last_login_at"))),
                 ]
             else:
                 rows = [
-                    ("User ID", str(state.account.user_id or "-")),
+                    ("Season 1 Medal", reward.medal.title() if reward else "-"),
                     ("Status", "Offline profile cache"),
                     ("Best Score", "Unavailable"),
                     ("Games Played", "Unavailable"),
@@ -490,6 +544,13 @@ def profile_screen(
                     elif action == "register":
                         _login_or_register(screen, clock, account_service, state, persist_state, register=True)
                     elif action == "logout":
+                        if not _confirm(
+                            screen,
+                            clock,
+                            "Log out?",
+                            "Are you sure you want to log out?",
+                        ):
+                            return
                         _wait_with_loading(
                             screen,
                             clock,
@@ -519,5 +580,6 @@ def profile_screen(
                             persist_state()
                             _message_screen(screen, clock, "Nickname changed", f"Now playing as {account.username}.")
                         except BackendClientError as exc:
-                            _message_screen(screen, clock, "Nickname error", str(exc))
+                            print(f"[auth-flow] Nickname error: {exc}")
+                            _message_screen(screen, clock, "Nickname error", normalize_auth_error(exc))
                     return

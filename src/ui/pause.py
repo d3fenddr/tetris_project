@@ -58,12 +58,11 @@ def pause_menu(
 
     while True:
         draw_game_frame()
-        draw_text(screen, f"Score: {score}", 24, WHITE, screen.get_width() // 2, 20)
 
         mx, my = pygame.mouse.get_pos()
         buttons: list[tuple[pygame.Rect, str]] = []
         for idx, (label, action) in enumerate(options):
-            y = screen.get_height() // 2 + idx * 50
+            y = screen.get_height() // 2 - 45 + idx * 58
             color = RED if abs(my - y) < 20 else WHITE
             rect = draw_text(screen, label, 26, color, screen.get_width() // 2, y)
             buttons.append((rect, action))

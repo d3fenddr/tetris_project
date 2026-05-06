@@ -104,6 +104,8 @@ class SessionService:
                 {
                     "score": int(item.get("score", 0)),
                     "date": str(item.get("date", "")),
+                    "mode": str(item.get("mode", "")),
+                    "lines": int(item.get("lines", 0)),
                 }
             )
         return result

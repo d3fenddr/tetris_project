@@ -100,7 +100,7 @@ def show_main_menu(
                         return label.lower()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    return "exit"
+                    continue
                 if event.key in (pygame.K_UP, pygame.K_w):
                     selected_index = (selected_index - 1) % len(button_labels)
                 elif event.key in (pygame.K_DOWN, pygame.K_s):

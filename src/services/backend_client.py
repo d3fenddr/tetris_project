@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -11,6 +12,8 @@ from src.config import (
     CURRENT_SEASON,
     DEBUG_ONLINE_SCORE_FLOW,
     NETWORK_TIMEOUT_SECONDS,
+    NETWORK_BACKOFF_SECONDS,
+    NETWORK_RETRIES,
     SCORE_NETWORK_TIMEOUT_SECONDS,
     TETRIS_BACKEND_URL,
 )
@@ -25,6 +28,47 @@ class BackendClientError(RuntimeError):
     @property
     def is_unavailable(self) -> bool:
         return self.error_type == "network"
+
+
+def _validation_error_message(detail: Any) -> str | None:
+    if not isinstance(detail, list):
+        return None
+    for item in detail:
+        if not isinstance(item, dict):
+            continue
+        location = item.get("loc")
+        error_type = str(item.get("type", ""))
+        if isinstance(location, list) and "password" in location and error_type == "string_too_short":
+            ctx = item.get("ctx") if isinstance(item.get("ctx"), dict) else {}
+            try:
+                min_length = int(ctx.get("min_length", 6))
+            except (TypeError, ValueError):
+                min_length = 6
+            return f"Password must be at least {min_length} characters."
+        if isinstance(location, list) and "nickname" in location and error_type == "string_too_short":
+            return "Nickname must be at least 3 characters."
+    return None
+
+
+def _friendly_error_message(path: str, status_code: int, detail: Any) -> str:
+    validation_message = _validation_error_message(detail)
+    if validation_message:
+        return validation_message
+
+    if path.startswith("/auth"):
+        clean_detail = str(detail or "").strip()
+        lowered = clean_detail.lower()
+        if status_code == 401 or "wrong" in lowered or "invalid" in lowered:
+            return "Nickname or password is incorrect."
+        if status_code == 404 or "not found" in lowered:
+            return "Account was not found."
+        if status_code == 409 or "already" in lowered or "taken" in lowered:
+            return "This nickname is already taken."
+        if status_code >= 500:
+            return "Account service is temporarily unavailable."
+        return "Something went wrong. Please try again."
+
+    return str(detail or "Backend request failed.")
 
 
 @dataclass
@@ -65,26 +109,46 @@ class BackendClient:
             or path.startswith("/auth/enter")
         )
         timeout = kwargs.pop("timeout", self._timeout_for_path(path))
-        try:
-            response = self.session.request(
-                method=method,
-                url=f"{self.base_url}{path}",
-                timeout=timeout,
-                headers={**self._headers(), **kwargs.pop("headers", {})},
-                **kwargs,
-            )
-        except requests.Timeout as exc:
+        headers = kwargs.pop("headers", {})
+        last_network_error: requests.RequestException | None = None
+        for attempt in range(NETWORK_RETRIES + 1):
+            try:
+                response = self.session.request(
+                    method=method,
+                    url=f"{self.base_url}{path}",
+                    timeout=timeout,
+                    headers={**self._headers(), **headers},
+                    **kwargs,
+                )
+            except requests.Timeout as exc:
+                last_network_error = exc
+                message = "Online backend timed out."
+            except requests.ConnectionError as exc:
+                last_network_error = exc
+                message = "Online backend is unavailable."
+                self.session.close()
+                self.session = requests.Session()
+            except requests.RequestException as exc:
+                last_network_error = exc
+                message = "Online backend is unavailable."
+            else:
+                if response.status_code >= 500 and attempt < NETWORK_RETRIES:
+                    if should_log:
+                        print(f"[score-flow] {method} {path} HTTP {response.status_code}, retry {attempt + 1}/{NETWORK_RETRIES}")
+                    time.sleep(NETWORK_BACKOFF_SECONDS * (attempt + 1))
+                    continue
+                break
+
             if should_log:
-                print(f"[score-flow] {method} {path} failed: Timeout, timeout={timeout}s")
-            raise BackendClientError("Online backend timed out.", error_type="network") from exc
-        except requests.ConnectionError as exc:
-            if should_log:
-                print(f"[score-flow] {method} {path} failed: ConnectionError, timeout={timeout}s")
-            raise BackendClientError("Online backend is unavailable.", error_type="network") from exc
-        except requests.RequestException as exc:
-            if should_log:
-                print(f"[score-flow] {method} {path} failed: {exc.__class__.__name__}, timeout={timeout}s")
-            raise BackendClientError("Online backend is unavailable.", error_type="network") from exc
+                print(
+                    f"[score-flow] {method} {path} failed: "
+                    f"{last_network_error.__class__.__name__ if last_network_error else 'RequestException'}, "
+                    f"retry={attempt}/{NETWORK_RETRIES}, timeout={timeout}s"
+                )
+            if attempt < NETWORK_RETRIES:
+                time.sleep(NETWORK_BACKOFF_SECONDS * (attempt + 1))
+                continue
+            raise BackendClientError(message, error_type="network") from last_network_error
 
         if should_log:
             print(f"[score-flow] {method} {path} -> HTTP {response.status_code}, timeout={timeout}s")
@@ -99,9 +163,9 @@ class BackendClient:
                 detail = response.text
                 if should_log:
                     print(f"[score-flow] {method} {path} error JSON parse failed: {exc.__class__.__name__}")
-            message = str(detail or "Backend request failed.")
+            message = _friendly_error_message(path, response.status_code, detail)
             if should_log:
-                print(f"[score-flow] {method} {path} error: {message[:160]}")
+                print(f"[score-flow] {method} {path} error: {str(detail or message)[:160]}")
             raise BackendClientError(message, status_code=response.status_code, error_type="http")
 
         if response.status_code == 204:
@@ -193,11 +257,18 @@ class BackendClient:
         if DEBUG_ONLINE_SCORE_FLOW:
             print(f"[score-flow] Submit payload: {payload}")
             print(f"[score-flow] Auth token present: {bool(self.access_token)}")
-        result = self._request(
-            "POST",
-            "/scores",
-            json=payload,
-        )
+        try:
+            result = self._request(
+                "POST",
+                "/scores",
+                json=payload,
+            )
+        except BackendClientError as exc:
+            if exc.status_code == 409:
+                if DEBUG_ONLINE_SCORE_FLOW:
+                    print("[score-flow] Score submit duplicate acknowledged as already saved.")
+                return {"id": None, "duplicate": True}
+            raise
         if DEBUG_ONLINE_SCORE_FLOW:
             score_id = result.get("id") if isinstance(result, dict) else None
             print(f"[score-flow] Score submit succeeded: id={score_id}")

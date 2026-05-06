@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Tuple
 
 from src.config import CURRENT_SEASON, DEBUG_ONLINE_SCORE_FLOW
 from src.services.backend_client import BackendClient, BackendClientError
-from src.services.google_sheet_service import GoogleSheetError, GoogleSheetService
+from src.services.google_sheet_service import GoogleSheetService
+from src.services.rewards import SEASON_1_REWARDS
 from src.services.session_service import SessionService
 from src.utils.date_utils import current_sheet_datetime
 
@@ -103,8 +104,9 @@ class ScoreService:
         except BackendClientError as exc:
             error = str(exc)
             message = f"Score was not submitted: {error}"
+            self.session_service.enqueue_pending_score(local_entry)
             if DEBUG_ONLINE_SCORE_FLOW:
-                print(f"[score-flow] {message}")
+                print(f"[score-flow] {message} Saved locally and queued for retry.")
             return ScoreSubmissionResult(False, message, error=error)
 
     def get_player_history(self, player_name: str = "") -> List[Dict[str, Any]]:
@@ -121,7 +123,4 @@ class ScoreService:
             raise RuntimeError("Online leaderboard is unavailable.") from exc
 
     def get_season1_top3(self) -> List[Tuple[str, Tuple[int, str]]]:
-        try:
-            return self.google_service.get_leaderboard()[:3]
-        except GoogleSheetError as exc:
-            raise RuntimeError("Season 1 leaderboard is unavailable right now.") from exc
+        return [(reward.username, (0, reward.medal)) for reward in SEASON_1_REWARDS]
