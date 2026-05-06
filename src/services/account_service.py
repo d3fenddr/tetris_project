@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from src.state import AccountSession
 from src.services.session_service import SessionService
-from src.config import DEBUG_ONLINE_SCORE_FLOW
+from src.config import DEBUG_ONLINE_SCORE_FLOW, REGISTER_RECOVERY_DELAY_SECONDS
 from src.services.backend_client import BackendAuth, BackendClient, BackendClientError
 
 
@@ -58,6 +59,12 @@ class AccountService:
         except BackendClientError as exc:
             if not exc.is_unavailable:
                 raise
+            if DEBUG_ONLINE_SCORE_FLOW:
+                print(
+                    "[score-flow] Register uncertain, waiting before login recovery: "
+                    f"{REGISTER_RECOVERY_DELAY_SECONDS}s"
+                )
+            time.sleep(REGISTER_RECOVERY_DELAY_SECONDS)
             if DEBUG_ONLINE_SCORE_FLOW:
                 print("[score-flow] Register uncertain, attempting one login recovery.")
             try:

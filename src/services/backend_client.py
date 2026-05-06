@@ -6,7 +6,14 @@ from uuid import uuid4
 
 import requests
 
-from src.config import CURRENT_SEASON, DEBUG_ONLINE_SCORE_FLOW, NETWORK_TIMEOUT_SECONDS, TETRIS_BACKEND_URL
+from src.config import (
+    AUTH_NETWORK_TIMEOUT_SECONDS,
+    CURRENT_SEASON,
+    DEBUG_ONLINE_SCORE_FLOW,
+    NETWORK_TIMEOUT_SECONDS,
+    SCORE_NETWORK_TIMEOUT_SECONDS,
+    TETRIS_BACKEND_URL,
+)
 
 
 class BackendClientError(RuntimeError):
@@ -57,21 +64,30 @@ class BackendClient:
             or path.startswith("/auth/register")
             or path.startswith("/auth/enter")
         )
+        timeout = kwargs.pop("timeout", self._timeout_for_path(path))
         try:
             response = self.session.request(
                 method=method,
                 url=f"{self.base_url}{path}",
-                timeout=self.timeout_seconds,
+                timeout=timeout,
                 headers={**self._headers(), **kwargs.pop("headers", {})},
                 **kwargs,
             )
+        except requests.Timeout as exc:
+            if should_log:
+                print(f"[score-flow] {method} {path} failed: Timeout, timeout={timeout}s")
+            raise BackendClientError("Online backend timed out.", error_type="network") from exc
+        except requests.ConnectionError as exc:
+            if should_log:
+                print(f"[score-flow] {method} {path} failed: ConnectionError, timeout={timeout}s")
+            raise BackendClientError("Online backend is unavailable.", error_type="network") from exc
         except requests.RequestException as exc:
             if should_log:
-                print(f"[score-flow] {method} {path} failed: backend unavailable")
+                print(f"[score-flow] {method} {path} failed: {exc.__class__.__name__}, timeout={timeout}s")
             raise BackendClientError("Online backend is unavailable.", error_type="network") from exc
 
         if should_log:
-            print(f"[score-flow] {method} {path} -> HTTP {response.status_code}")
+            print(f"[score-flow] {method} {path} -> HTTP {response.status_code}, timeout={timeout}s")
 
         if response.status_code >= 400:
             try:
@@ -79,8 +95,10 @@ class BackendClient:
                 detail = error_json.get("detail") if isinstance(error_json, dict) else None
                 if should_log and isinstance(error_json, dict):
                     print(f"[score-flow] {method} {path} error body keys: {sorted(error_json.keys())}")
-            except ValueError:
+            except ValueError as exc:
                 detail = response.text
+                if should_log:
+                    print(f"[score-flow] {method} {path} error JSON parse failed: {exc.__class__.__name__}")
             message = str(detail or "Backend request failed.")
             if should_log:
                 print(f"[score-flow] {method} {path} error: {message[:160]}")
@@ -94,10 +112,17 @@ class BackendClient:
                 keys = sorted(data.keys()) if isinstance(data, dict) else []
                 print(f"[score-flow] {method} {path} JSON parsed: yes, keys={keys}")
             return data
-        except ValueError:
+        except ValueError as exc:
             if should_log:
-                print(f"[score-flow] {method} {path} JSON parsed: no")
+                print(f"[score-flow] {method} {path} JSON parsed: no, error={exc.__class__.__name__}")
             return None
+
+    def _timeout_for_path(self, path: str) -> float:
+        if path.startswith(("/auth/register", "/auth/login", "/auth/enter", "/auth/me")):
+            return AUTH_NETWORK_TIMEOUT_SECONDS
+        if path.startswith("/scores"):
+            return SCORE_NETWORK_TIMEOUT_SECONDS
+        return self.timeout_seconds
 
     def register(self, nickname: str, password: str) -> BackendAuth:
         data = self._request("POST", "/auth/register", json={"nickname": nickname, "password": password})
