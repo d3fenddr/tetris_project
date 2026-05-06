@@ -14,8 +14,6 @@ from src.config import (
     GOOGLE_FIELD_SCORE,
     GOOGLE_FORM_URL,
     GOOGLE_SHEET_CSV_URL,
-    WINDOW_HEIGHT,
-    WINDOW_WIDTH,
 )
 from src.game.gameplay import main_game
 from src.services.account_service import AccountService
@@ -36,9 +34,6 @@ def run() -> None:
     audio_available = initialize_pygame()
     screen = create_window()
     clock = pygame.time.Clock()
-
-    if screen.get_width() != WINDOW_WIDTH or screen.get_height() != WINDOW_HEIGHT:
-        screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
 
     assets, warnings = load_assets(audio_available)
     for warning in warnings:
@@ -125,7 +120,6 @@ def run() -> None:
             state.game_mode = selected_mode
             persist_state()
             stop_music()
-            play_music(assets.game_music_path)
 
             def open_settings() -> None:
                 settings_menu(screen, clock, state, apply_volume, persist_state)
@@ -149,12 +143,13 @@ def run() -> None:
                 background_img=assets.background_img,
                 score_service=score_service,
                 open_pause_menu=open_pause,
+                on_countdown_complete=lambda: play_music(assets.game_music_path),
                 on_game_over=stop_music,
             )
         elif action == "history":
             show_history(screen, clock, state, score_service)
         elif action == "profile":
-            profile_screen(screen, clock, state, account_service, persist_state)
+            profile_screen(screen, clock, state, account_service, persist_state, on_logout=stop_music)
             if not state.account:
                 account_startup_screen(screen, clock, state, account_service, persist_state)
         elif action == "season 1 top 3":

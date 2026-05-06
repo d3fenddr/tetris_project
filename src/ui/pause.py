@@ -5,7 +5,8 @@ from typing import Callable, Optional
 import pygame
 
 from src.config import BLACK, BUTTON_DEBOUNCE_MS, FPS, RED, WHITE
-from src.utils.ui_helpers import draw_text
+from src.utils.layout import handle_resize_event
+from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
 
 
 def confirm_exit_mouse(screen: pygame.Surface, clock: pygame.time.Clock) -> bool:
@@ -31,6 +32,9 @@ def confirm_exit_mouse(screen: pygame.Surface, clock: pygame.time.Clock) -> bool
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if yes_rect.collidepoint(event.pos):
                     return True
@@ -70,6 +74,9 @@ def pause_menu(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 on_unpause_music()
                 return None

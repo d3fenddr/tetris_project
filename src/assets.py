@@ -15,9 +15,8 @@ from src.config import (
     ASSET_GAME_MUSIC,
     ASSET_MENU_MUSIC,
     BLACK,
-    WINDOW_HEIGHT,
-    WINDOW_WIDTH,
 )
+from src.utils.layout import initial_window_size
 from src.utils.resource_path import resource_path
 
 @dataclass
@@ -41,7 +40,7 @@ def initialize_pygame() -> bool:
 
 
 def create_window() -> pygame.Surface:
-    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    screen = pygame.display.set_mode(initial_window_size(), pygame.RESIZABLE)
     pygame.display.set_caption(APP_TITLE)
     return screen
 
@@ -55,7 +54,7 @@ def _fallback_image(size: Tuple[int, int]) -> pygame.Surface:
 def _load_image(path: str, size: Tuple[int, int], warnings: List[str]) -> pygame.Surface:
     try:
         image = pygame.image.load(path).convert()
-        return pygame.transform.scale(image, size)
+        return image
     except pygame.error as exc:
         warnings.append(f"Image load failed: {path} ({exc})")
         return _fallback_image(size)
@@ -71,8 +70,9 @@ def load_assets(audio_available: bool) -> tuple[AssetBundle, List[str]]:
     background_path = resource_path(ASSET_BACKGROUND)
     first_page_path = resource_path(ASSET_FIRST_PAGE)
 
-    background_img = _load_image(background_path, (WINDOW_WIDTH, WINDOW_HEIGHT), warnings)
-    first_page_img = _load_image(first_page_path, (WINDOW_WIDTH, WINDOW_HEIGHT), warnings)
+    fallback_size = initial_window_size()
+    background_img = _load_image(background_path, fallback_size, warnings)
+    first_page_img = _load_image(first_page_path, fallback_size, warnings)
 
     if not os.path.exists(menu_music_path):
         warnings.append(f"Music file not found: {menu_music_path}")

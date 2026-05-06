@@ -13,15 +13,18 @@ from src.config import (
     FPS,
     GOLD,
     GRAY,
+    LEADERBOARD_PANEL_MAX_WIDTH,
     MUTED_TEXT,
     PANEL_BG,
     PANEL_BORDER,
     RED,
     SILVER,
+    SEASON1_PANEL_MAX_WIDTH,
     WHITE,
 )
 from src.game.modes import game_mode_label
 from src.services.score_service import ScoreService
+from src.utils.layout import content_rect, handle_resize_event
 from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
 
 
@@ -102,7 +105,8 @@ def show_leaderboard(
 
         mouse_pos = pygame.mouse.get_pos()
         tab_rects: list[tuple[int, pygame.Rect]] = []
-        tab_width = 62
+        table_rect = content_rect(screen, LEADERBOARD_PANEL_MAX_WIDTH, max(1, screen.get_height() - 130), y=110)
+        tab_width = min(112, max(62, table_rect.width // len(LEADERBOARD_TABS)))
         start_x = screen.get_width() // 2 - (tab_width * len(LEADERBOARD_TABS)) // 2
         for idx, (_mode, label) in enumerate(LEADERBOARD_TABS):
             rect = pygame.Rect(start_x + idx * tab_width, 72, tab_width - 5, 32)
@@ -134,7 +138,7 @@ def show_leaderboard(
                 score = int(row.get("score", 0))
                 mode = str(row.get("mode", "")).lower()
                 lines = int(row.get("lines", 0))
-                row_rect = pygame.Rect(18, y - 22, screen.get_width() - 36, 43)
+                row_rect = content_rect(screen, LEADERBOARD_PANEL_MAX_WIDTH, 43, y=y - 22)
                 draw_panel(screen, row_rect, PANEL_BG, PANEL_BORDER, radius=7)
                 draw_text(screen, f"{rank}. {nickname}", 18, color, row_rect.x + 72, y - 5)
                 draw_text(screen, str(score), 18, WHITE, row_rect.right - 54, y - 5)
@@ -148,6 +152,9 @@ def show_leaderboard(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return
@@ -195,23 +202,30 @@ def show_season1_top3(
                 pass
 
         screen.fill(BLACK)
-        draw_text_shadow(screen, "Season 1 Top 3", 34, WHITE, screen.get_width() // 2, 56)
+        draw_text_shadow(screen, "SEASON 1 WINNERS", 34, WHITE, screen.get_width() // 2, 56)
+        draw_text(screen, "Archived Google leaderboard", 17, MUTED_TEXT, screen.get_width() // 2, 94)
 
         if loading:
             draw_text(screen, "Loading archived winners...", 24, WHITE, screen.get_width() // 2, 180)
         elif load_error and not winners:
-            draw_text(screen, "Season 1 leaderboard is unavailable right now.", 20, RED, screen.get_width() // 2, 180)
-        elif not winners:
-            draw_text(screen, "No Season 1 winners found.", 22, WHITE, screen.get_width() // 2, 180)
+            panel = content_rect(screen, SEASON1_PANEL_MAX_WIDTH, 190, y=150)
+            draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
+            draw_text(screen, "Season 1 leaderboard is unavailable right now.", 18, RED, panel.centerx, panel.centery)
         else:
             labels = ["1st", "2nd", "3rd"]
-            for idx, (name, (score, _date)) in enumerate(winners[:3]):
-                y = 170 + idx * 90
-                rect = pygame.Rect(35, y - 32, screen.get_width() - 70, 70)
+            podium = [
+                winners[idx] if idx < len(winners) else ("No player recorded", (0, ""))
+                for idx in range(3)
+            ]
+            for idx, (name, (score, _date)) in enumerate(podium):
+                y = 165 + idx * 92
+                rect = content_rect(screen, SEASON1_PANEL_MAX_WIDTH, 72, y=y - 32)
                 draw_panel(screen, rect, PANEL_BG, PANEL_BORDER)
                 draw_text(screen, labels[idx], 23, colors[idx], screen.get_width() // 2, y - 9)
-                draw_text(screen, f"{name}: {score}", 21, WHITE, screen.get_width() // 2, y + 18)
+                text = f"{name}: {score}" if score else name
+                draw_text(screen, text, 21, WHITE, screen.get_width() // 2, y + 18)
 
+        draw_text(screen, "Season 2 uses the online database leaderboard.", 15, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 54)
         draw_text(screen, "ESC to return", 20, GRAY, screen.get_width() // 2, screen.get_height() - 20)
         pygame.display.update()
         clock.tick(FPS)
@@ -219,5 +233,8 @@ def show_season1_top3(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 return

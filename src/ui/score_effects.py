@@ -10,7 +10,6 @@ from src.config import (
     BOARD_FLASH_MAX_ALPHA,
     BOARD_FLASH_WIDTH,
     COMBO_DISPLAY_DURATION_MS,
-    COMBO_WINDOW_MS,
     SCORE_EFFECTS_ENABLED,
     SCORE_POPUP_COLOR,
     SCORE_POPUP_COMBO_COLOR,
@@ -57,15 +56,11 @@ class ScoreEffectManager:
         self.popups: list[ScorePopup] = []
         self.board_flash_start_ms: int | None = None
         self.score_pulse_start_ms: int | None = None
-        self.combo_count = 0
-        self.last_line_clear_ms = -COMBO_WINDOW_MS
 
     def reset(self) -> None:
         self.popups.clear()
         self.board_flash_start_ms = None
         self.score_pulse_start_ms = None
-        self.combo_count = 0
-        self.last_line_clear_ms = -COMBO_WINDOW_MS
 
     def _add_popup(self, popup: ScorePopup) -> None:
         if not SCORE_EFFECTS_ENABLED:
@@ -89,17 +84,12 @@ class ScoreEffectManager:
             )
         )
 
-    def add_line_clear(self, points: int, lines: int, now_ms: int, x: int, y: int) -> None:
+    def add_line_clear(self, points: int, lines: int, now_ms: int, x: int, y: int, combo_count: int = 1) -> None:
         if points <= 0 or lines <= 0:
             return
 
         self.score_pulse_start_ms = now_ms
         self.board_flash_start_ms = now_ms
-        if now_ms - self.last_line_clear_ms <= COMBO_WINDOW_MS:
-            self.combo_count += 1
-        else:
-            self.combo_count = 1
-        self.last_line_clear_ms = now_ms
 
         label = f"{lines} line{'s' if lines != 1 else ''} +{points}"
         self._add_popup(
@@ -114,10 +104,10 @@ class ScoreEffectManager:
             )
         )
 
-        if self.combo_count > 1:
+        if combo_count >= 2:
             self._add_popup(
                 ScorePopup(
-                    text=f"Combo x{self.combo_count}",
+                    text=f"COMBO x{combo_count}",
                     x=x,
                     y=y + 34,
                     color=SCORE_POPUP_COMBO_COLOR,

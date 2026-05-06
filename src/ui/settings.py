@@ -4,9 +4,22 @@ from typing import Callable
 
 import pygame
 
-from src.config import BLACK, GRAY, RED, WHITE, FPS
+from src.config import (
+    BLACK,
+    BUTTON_DEBOUNCE_MS,
+    FPS,
+    MENU_BUTTON_HEIGHT,
+    MENU_BUTTON_WIDTH,
+    MUTED_TEXT,
+    PANEL_BG,
+    PANEL_BORDER,
+    RED,
+    SETTINGS_PANEL_MAX_WIDTH,
+    WHITE,
+)
 from src.state import AppState
-from src.utils.ui_helpers import draw_text
+from src.utils.layout import content_rect, handle_resize_event
+from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
 
 
 def settings_menu(
@@ -16,45 +29,79 @@ def settings_menu(
     apply_volume: Callable[[], None],
     on_state_changed: Callable[[], None],
 ) -> None:
+    last_click_ms = 0
+
+    def change_volume(delta: int) -> None:
+        state.volume_percent = min(100, max(0, state.volume_percent + delta))
+        apply_volume()
+        on_state_changed()
+
+    def toggle_music() -> None:
+        state.music_enabled = not state.music_enabled
+        apply_volume()
+        on_state_changed()
+
     while True:
         screen.fill(BLACK)
-        draw_text(screen, "Settings", 36, WHITE, screen.get_width() // 2, 80)
-        draw_text(
+        draw_text_shadow(screen, "Settings", 36, WHITE, screen.get_width() // 2, 62)
+
+        panel = content_rect(screen, SETTINGS_PANEL_MAX_WIDTH, 300, y=122)
+        draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
+        draw_text(screen, "Audio", 24, WHITE, panel.centerx, panel.y + 38)
+        draw_text(screen, "Music Volume", 16, MUTED_TEXT, panel.centerx, panel.y + 82)
+        draw_text(screen, f"{state.volume_percent}%", 34, WHITE, panel.centerx, panel.y + 122)
+
+        bar_rect = pygame.Rect(panel.x + 40, panel.y + 154, panel.width - 80, 12)
+        pygame.draw.rect(screen, (18, 20, 28), bar_rect, border_radius=6)
+        fill_rect = bar_rect.copy()
+        fill_rect.width = int(bar_rect.width * (state.volume_percent / 100))
+        pygame.draw.rect(screen, RED, fill_rect, border_radius=6)
+        pygame.draw.rect(screen, PANEL_BORDER, bar_rect, width=1, border_radius=6)
+
+        mouse_pos = pygame.mouse.get_pos()
+        minus_rect = pygame.Rect(panel.x + 45, panel.y + 190, 72, 38)
+        plus_rect = pygame.Rect(panel.right - 117, panel.y + 190, 72, 38)
+        toggle_rect = pygame.Rect(0, 0, MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT)
+        toggle_rect.center = (panel.centerx, panel.y + 260)
+
+        draw_button(screen, minus_rect, "-10", 20, hovered=minus_rect.collidepoint(mouse_pos))
+        draw_button(screen, plus_rect, "+10", 20, hovered=plus_rect.collidepoint(mouse_pos))
+        draw_button(
             screen,
-            f"Music Volume: {state.volume_percent}%",
-            28,
-            WHITE,
-            screen.get_width() // 2,
-            200,
+            toggle_rect,
+            f"Music: {'On' if state.music_enabled else 'Off'}",
+            21,
+            hovered=toggle_rect.collidepoint(mouse_pos),
+            selected=state.music_enabled,
         )
-        draw_text(screen, "LEFT/RIGHT to adjust", 20, GRAY, screen.get_width() // 2, 235)
-        draw_text(
-            screen,
-            f"Music: {'On' if state.music_enabled else 'Off'} (Press M)",
-            28,
-            WHITE,
-            screen.get_width() // 2,
-            300,
-        )
-        draw_text(screen, "ESC to return", 20, GRAY, screen.get_width() // 2, screen.get_height() - 20)
+
+        draw_text(screen, "LEFT/RIGHT volume   M music   ESC back", 14, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 28)
         pygame.display.update()
         clock.tick(FPS)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
-                    state.volume_percent = max(0, state.volume_percent - 10)
-                    apply_volume()
-                    on_state_changed()
+                    change_volume(-10)
                 elif event.key == pygame.K_RIGHT:
-                    state.volume_percent = min(100, state.volume_percent + 10)
-                    apply_volume()
-                    on_state_changed()
+                    change_volume(10)
                 elif event.key == pygame.K_m:
-                    state.music_enabled = not state.music_enabled
-                    apply_volume()
-                    on_state_changed()
+                    toggle_music()
                 elif event.key == pygame.K_ESCAPE:
                     return
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                now = pygame.time.get_ticks()
+                if now - last_click_ms < BUTTON_DEBOUNCE_MS:
+                    continue
+                last_click_ms = now
+                if minus_rect.collidepoint(event.pos):
+                    change_volume(-10)
+                elif plus_rect.collidepoint(event.pos):
+                    change_volume(10)
+                elif toggle_rect.collidepoint(event.pos):
+                    toggle_music()

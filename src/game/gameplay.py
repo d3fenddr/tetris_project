@@ -8,7 +8,6 @@ import pygame
 
 from src.config import (
     BLACK,
-    BLOCK_SIZE,
     COLS,
     FPS,
     GRAY,
@@ -32,25 +31,33 @@ from src.game.scoring import score_for_cleared_lines
 from src.services.score_service import ScoreService
 from src.state import AppState
 from src.ui.score_effects import ScoreEffectManager
-from src.utils.ui_helpers import draw_button, draw_text, draw_text_shadow
+from src.utils.layout import calculate_layout, handle_resize_event
+from src.utils.ui_helpers import draw_button, draw_image_cover, draw_text, draw_text_shadow
 
 
 def draw_grid(screen: pygame.Surface, background_img: pygame.Surface, grid: list[list[int]]) -> None:
-    screen.blit(background_img, (0, 0))
-    width, height = screen.get_size()
+    layout = calculate_layout(screen.get_width(), screen.get_height())
+    draw_image_cover(screen, background_img)
     for y in range(ROWS):
         for x in range(COLS):
             if grid[y][x]:
                 pygame.draw.rect(
                     screen,
                     LOCKED_PIECE_COLOR,
-                    (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE),
+                    (
+                        layout.board_x + x * layout.block_size,
+                        layout.board_y + y * layout.block_size,
+                        layout.block_size,
+                        layout.block_size,
+                    ),
                 )
     for y in range(ROWS + 1):
-        pygame.draw.line(screen, GRAY, (0, y * BLOCK_SIZE), (width, y * BLOCK_SIZE), 1)
+        py = layout.board_y + y * layout.block_size
+        pygame.draw.line(screen, GRAY, (layout.board_x, py), (layout.board_x + layout.board_width, py), 1)
     for x in range(COLS + 1):
-        pygame.draw.line(screen, GRAY, (x * BLOCK_SIZE, 0), (x * BLOCK_SIZE, height), 1)
-    pygame.draw.rect(screen, GRAY, (0, 0, width, height), 2)
+        px = layout.board_x + x * layout.block_size
+        pygame.draw.line(screen, GRAY, (px, layout.board_y), (px, layout.board_y + layout.board_height), 1)
+    pygame.draw.rect(screen, GRAY, (layout.board_x, layout.board_y, layout.board_width, layout.board_height), 2)
 
 
 def _focus_lost(event: pygame.event.Event) -> bool:
@@ -67,13 +74,14 @@ def draw_game_hud(
     effects: ScoreEffectManager,
     now_ms: int,
 ) -> None:
+    layout = calculate_layout(screen.get_width(), screen.get_height())
     draw_text_shadow(
         screen,
         f"Score: {score}",
         effects.score_font_size(HUD_SCORE_FONT_SIZE, now_ms),
         HUD_SCORE_TEXT_COLOR,
-        screen.get_width() // 2,
-        27,
+        layout.hud_x,
+        layout.hud_y,
         HUD_SCORE_SHADOW_COLOR,
         HUD_SCORE_SHADOW_OFFSET,
     )
@@ -82,19 +90,30 @@ def draw_game_hud(
         f"Mode: {game_mode_label(game_mode)}",
         HUD_MODE_FONT_SIZE,
         WHITE,
-        screen.get_width() // 2,
-        54,
+        layout.hud_x,
+        layout.hud_y + max(22, int(24 * layout.scale)),
         HUD_SCORE_SHADOW_COLOR,
         HUD_SCORE_SHADOW_OFFSET,
     )
 
 
-def countdown(screen: pygame.Surface, clock: pygame.time.Clock) -> None:
+def countdown(screen: pygame.Surface, clock: pygame.time.Clock) -> pygame.Surface:
     for value in range(3, 0, -1):
         screen.fill(BLACK)
         draw_text(screen, str(value), 60, WHITE, screen.get_width() // 2, screen.get_height() // 2)
         pygame.display.update()
-        clock.tick(1)
+        started_ms = pygame.time.get_ticks()
+        while pygame.time.get_ticks() - started_ms < 1000:
+            clock.tick(FPS)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    raise SystemExit
+                if event.type == pygame.VIDEORESIZE:
+                    screen = handle_resize_event(event)
+                    screen.fill(BLACK)
+                    draw_text(screen, str(value), 60, WHITE, screen.get_width() // 2, screen.get_height() // 2)
+                    pygame.display.update()
+    return screen
 
 
 def game_over_screen(
@@ -126,6 +145,9 @@ def game_over_screen(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if play_rect.collidepoint(event.pos):
                     return True
@@ -140,16 +162,20 @@ def main_game(
     background_img: pygame.Surface,
     score_service: ScoreService,
     open_pause_menu: Callable[[Callable[[], None], int], str | None],
+    on_countdown_complete: Callable[[], None] | None = None,
     on_game_over: Callable[[], None] | None = None,
 ) -> None:
     while True:
-        countdown(screen, clock)
+        screen = countdown(screen, clock)
+        if on_countdown_complete is not None:
+            on_countdown_complete()
 
         locked: dict[tuple[int, int], int] = {}
         fall_time = 0
         fall_speed = 1.0
         score = 0
         total_lines = 0
+        combo_count = 0
         piece_weights = piece_weights_for_mode(state.game_mode)
         piece = Piece.spawn(SHAPES, piece_weights, COLS)
         effects = ScoreEffectManager()
@@ -173,14 +199,16 @@ def main_game(
             return False
 
         def lock_piece(now_ms: int) -> None:
-            nonlocal locked, piece, running, score, total_lines, fall_time
+            nonlocal locked, piece, running, score, total_lines, fall_time, combo_count
             for x, y in piece.get_cells():
                 locked[(x, y)] = 1
 
             locked, cleared = clear_full_rows(locked, ROWS, COLS)
             if cleared:
+                combo_count += 1
                 total_lines += cleared
-                points = score_for_cleared_lines(cleared)
+                base_points = score_for_cleared_lines(cleared)
+                points = base_points * combo_count
                 score += points
                 effects.add_line_clear(
                     points=points,
@@ -188,7 +216,10 @@ def main_game(
                     now_ms=now_ms,
                     x=screen.get_width() // 2,
                     y=screen.get_height() // 2,
+                    combo_count=combo_count,
                 )
+            else:
+                combo_count = 0
 
             piece = spawn_piece()
             grid = current_grid()
@@ -231,11 +262,12 @@ def main_game(
         def draw_frame() -> None:
             now_ms = pygame.time.get_ticks()
             grid = current_grid()
+            layout = calculate_layout(screen.get_width(), screen.get_height())
             draw_grid(screen, background_img, grid)
-            piece.draw(screen, BLOCK_SIZE, WHITE, BLACK)
+            piece.draw(screen, layout.block_size, WHITE, BLACK, layout.board_x, layout.board_y)
             effects.draw_board_flash(
                 screen,
-                pygame.Rect(0, 0, screen.get_width(), screen.get_height()),
+                pygame.Rect(layout.board_x, layout.board_y, layout.board_width, layout.board_height),
                 now_ms,
             )
             draw_game_hud(screen, score, state.game_mode, effects, now_ms)
@@ -249,6 +281,11 @@ def main_game(
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     raise SystemExit
+                if event.type == pygame.VIDEORESIZE:
+                    screen = handle_resize_event(event)
+                    key_repeat.clear()
+                    single_action_keys_held.clear()
+                    continue
                 if _focus_lost(event):
                     key_repeat.clear()
                     single_action_keys_held.clear()

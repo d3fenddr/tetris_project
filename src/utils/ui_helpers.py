@@ -12,6 +12,7 @@ from src.config import (
     PANEL_BORDER,
     WHITE,
 )
+from src.utils.layout import scale_font
 
 
 def draw_text(
@@ -22,7 +23,7 @@ def draw_text(
     x: int,
     y: int,
 ) -> pygame.Rect:
-    font = pygame.font.SysFont("comicsans", size)
+    font = pygame.font.SysFont("comicsans", scale_font(size, screen))
     label = font.render(text, True, color)
     rect = label.get_rect(center=(x, y))
     screen.blit(label, rect)
@@ -76,3 +77,15 @@ def draw_button(
     pygame.draw.rect(screen, border, rect, width=1, border_radius=8)
     draw_text(screen, label, font_size, text_color, rect.centerx, rect.centery)
     return rect
+
+
+def draw_image_cover(screen: pygame.Surface, image: pygame.Surface) -> None:
+    target_width, target_height = screen.get_size()
+    if image.get_width() <= 0 or image.get_height() <= 0:
+        screen.fill(BLACK)
+        return
+    scale = max(target_width / image.get_width(), target_height / image.get_height())
+    scaled_size = (max(1, int(image.get_width() * scale)), max(1, int(image.get_height() * scale)))
+    scaled = pygame.transform.smoothscale(image, scaled_size)
+    rect = scaled.get_rect(center=(target_width // 2, target_height // 2))
+    screen.blit(scaled, rect)

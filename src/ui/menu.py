@@ -27,7 +27,8 @@ from src.config import (
 from src.config import GAME_MODE_ORDER
 from src.game.modes import game_mode_description, game_mode_label, next_game_mode
 from src.state import AppState
-from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
+from src.utils.layout import handle_resize_event
+from src.utils.ui_helpers import draw_button, draw_image_cover, draw_panel, draw_text, draw_text_shadow
 
 
 def show_main_menu(
@@ -37,12 +38,16 @@ def show_main_menu(
     background_img: pygame.Surface,
 ) -> str:
     button_labels = ["Play", "Profile", "Leaderboard", "Season 1 Top 3", "History", "Settings", "Exit"]
-    start_y = 208
     last_click_ms = 0
     selected_index = 0
 
     while True:
-        screen.blit(background_img, (0, 0))
+        button_width = min(max(MENU_BUTTON_WIDTH, int(screen.get_width() * 0.46)), screen.get_width() - 80)
+        button_height = max(MENU_BUTTON_HEIGHT, int(screen.get_height() * 0.052))
+        button_gap = max(MENU_BUTTON_GAP, int(screen.get_height() * 0.014))
+        total_height = len(button_labels) * button_height + (len(button_labels) - 1) * button_gap
+        start_y = max(160, screen.get_height() // 2 - total_height // 2 + 58)
+        draw_image_cover(screen, background_img)
         overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
         overlay.fill((8, 10, 16, 132))
         screen.blit(overlay, (0, 0))
@@ -58,10 +63,10 @@ def show_main_menu(
         mouse_x, mouse_y = pygame.mouse.get_pos()
         button_rects: list[tuple[str, pygame.Rect]] = []
         for idx, label in enumerate(button_labels):
-            rect = pygame.Rect(0, 0, MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT)
+            rect = pygame.Rect(0, 0, button_width, button_height)
             rect.center = (
                 screen.get_width() // 2,
-                start_y + idx * (MENU_BUTTON_HEIGHT + MENU_BUTTON_GAP),
+                start_y + idx * (button_height + button_gap),
             )
             hovered = rect.collidepoint(mouse_x, mouse_y)
             if hovered:
@@ -82,6 +87,9 @@ def show_main_menu(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 now = pygame.time.get_ticks()
                 if now - last_click_ms < BUTTON_DEBOUNCE_MS:
@@ -113,7 +121,7 @@ def show_game_mode_selector(
 
     while True:
         selected_mode = GAME_MODE_ORDER[selected_index]
-        screen.blit(background_img, (0, 0))
+        draw_image_cover(screen, background_img)
         overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
         overlay.fill((8, 10, 16, 150))
         screen.blit(overlay, (0, 0))
@@ -122,10 +130,15 @@ def show_game_mode_selector(
 
         mouse_pos = pygame.mouse.get_pos()
         mode_rects: list[tuple[pygame.Rect, str]] = []
+        card_width = min(max(MODE_CARD_WIDTH, int(screen.get_width() * 0.62)), screen.get_width() - 64)
+        card_height = max(MODE_CARD_HEIGHT, int(screen.get_height() * 0.082))
+        card_gap = max(MODE_CARD_GAP, int(screen.get_height() * 0.014))
+        total_cards_height = len(GAME_MODE_ORDER) * card_height + (len(GAME_MODE_ORDER) - 1) * card_gap
+        cards_start_y = max(150, screen.get_height() // 2 - total_cards_height // 2 + 18)
         for idx, mode in enumerate(GAME_MODE_ORDER):
-            y = 162 + idx * (MODE_CARD_HEIGHT + MODE_CARD_GAP)
+            y = cards_start_y + idx * (card_height + card_gap)
             label = game_mode_label(mode)
-            hit_rect = pygame.Rect(0, 0, MODE_CARD_WIDTH, MODE_CARD_HEIGHT)
+            hit_rect = pygame.Rect(0, 0, card_width, card_height)
             hit_rect.center = (screen.get_width() // 2, y)
             hovered = hit_rect.collidepoint(mouse_pos)
             if hovered:
@@ -154,6 +167,9 @@ def show_game_mode_selector(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.MOUSEMOTION:
                 for idx, (rect, mode) in enumerate(mode_rects):
                     if rect.collidepoint(event.pos):

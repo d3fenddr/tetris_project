@@ -59,13 +59,15 @@ class Piece:
         block_size: int,
         fill_color: tuple[int, int, int],
         border_color: tuple[int, int, int],
+        offset_x: int = 0,
+        offset_y: int = 0,
     ) -> None:
         for i, row in enumerate(self.shape):
             for j, cell in enumerate(row):
                 if cell:
                     rect = pygame.Rect(
-                        (self.x + j) * block_size,
-                        (self.y + i) * block_size,
+                        offset_x + (self.x + j) * block_size,
+                        offset_y + (self.y + i) * block_size,
                         block_size,
                         block_size,
                     )

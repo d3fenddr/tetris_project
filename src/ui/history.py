@@ -7,11 +7,13 @@ from typing import Dict, List
 
 import pygame
 
-from src.config import BLACK, FPS, GRAY, RED, WHITE
+from src.config import BLACK, FPS, HISTORY_PANEL_MAX_WIDTH, MUTED_TEXT, PANEL_BG, PANEL_BORDER, RED, WHITE
+from src.game.modes import game_mode_label
 from src.services.score_service import ScoreService
 from src.state import AppState
 from src.utils.date_utils import format_short_date, format_short_time, parse_sheet_datetime
-from src.utils.ui_helpers import draw_text
+from src.utils.layout import content_rect, handle_resize_event
+from src.utils.ui_helpers import draw_panel, draw_text, draw_text_shadow
 
 
 def _load_history_worker(
@@ -76,22 +78,40 @@ def show_history(
                 pass
 
         screen.fill(BLACK)
+        draw_text_shadow(screen, "Season 2 History", 30, WHITE, screen.get_width() // 2, 38)
         if loading:
-            draw_text(screen, "Loading history...", 28, WHITE, screen.get_width() // 2, screen.get_height() // 2 - 10)
-            draw_text(screen, "ESC to return", 20, GRAY, screen.get_width() // 2, screen.get_height() - 30)
+            panel = content_rect(screen, HISTORY_PANEL_MAX_WIDTH, 150, y=220)
+            draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
+            draw_text(screen, "Loading history...", 24, WHITE, panel.centerx, panel.centery - 8)
+            draw_text(screen, "Fetching Season 2 games", 15, MUTED_TEXT, panel.centerx, panel.centery + 26)
+            draw_text(screen, "ESC to return", 17, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 24)
         elif load_error and not history:
-            draw_text(screen, "History unavailable", 30, RED, screen.get_width() // 2, 110)
-            draw_text(screen, load_error[:40], 18, GRAY, screen.get_width() // 2, 160)
-            draw_text(screen, "Press R to retry", 20, WHITE, screen.get_width() // 2, 220)
-            draw_text(screen, "ESC to return", 20, GRAY, screen.get_width() // 2, screen.get_height() - 30)
+            panel = content_rect(screen, HISTORY_PANEL_MAX_WIDTH, 210, y=145)
+            draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
+            draw_text(screen, "History unavailable", 25, RED, panel.centerx, panel.y + 48)
+            draw_text(screen, load_error[:40], 15, MUTED_TEXT, panel.centerx, panel.y + 88)
+            draw_text(screen, "Press R to retry", 18, WHITE, panel.centerx, panel.y + 142)
+            draw_text(screen, "ESC to return", 17, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 24)
         else:
             filtered = apply_sort(history)
             pages = max(1, (len(filtered) + per_page - 1) // per_page)
             page = min(page, pages - 1)
             display = filtered[page * per_page : (page + 1) * per_page]
 
-            draw_text(screen, f"Season 2 History: Page {page + 1}/{pages}", 24, WHITE, screen.get_width() // 2, 30)
-            draw_text(screen, f"Total Games: {len(history)}", 20, GRAY, screen.get_width() // 2, 60)
+            best_score = max((int(item.get("score", 0)) for item in history), default=0)
+            stat_panel = content_rect(screen, HISTORY_PANEL_MAX_WIDTH, 58, y=68)
+            draw_panel(screen, stat_panel, PANEL_BG, PANEL_BORDER)
+            draw_text(screen, f"Games: {len(history)}", 16, WHITE, stat_panel.x + 76, stat_panel.centery - 7)
+            draw_text(screen, f"Best: {best_score}", 16, WHITE, stat_panel.centerx, stat_panel.centery - 7)
+            draw_text(screen, f"Page {page + 1}/{pages}", 16, WHITE, stat_panel.right - 72, stat_panel.centery - 7)
+            draw_text(
+                screen,
+                f"Sort: {sort_mode} | {'Oldest first' if ascending else 'Newest first'}",
+                12,
+                MUTED_TEXT,
+                stat_panel.centerx,
+                stat_panel.centery + 16,
+            )
 
             if not display:
                 draw_text(screen, "No games found", 24, WHITE, screen.get_width() // 2, screen.get_height() // 2)
@@ -102,10 +122,12 @@ def show_history(
                 )
                 game_index_map = {id(rec): idx + 1 for idx, rec in enumerate(history_by_date)}
                 for idx, record in enumerate(display):
-                    y = 100 + idx * 60
+                    y = 158 + idx * 58
                     game_number = game_index_map.get(id(record), page * per_page + idx + 1)
-                    draw_text(screen, f"Game {game_number}", 22, WHITE, screen.get_width() // 2 - 100, y)
-                    draw_text(screen, f"Score: {int(record.get('score', 0))}", 20, WHITE, screen.get_width() // 2 - 100, y + 25)
+                    row_rect = content_rect(screen, HISTORY_PANEL_MAX_WIDTH, 48, y=y - 24)
+                    draw_panel(screen, row_rect, PANEL_BG, PANEL_BORDER, radius=7)
+                    draw_text(screen, f"Game {game_number}", 15, MUTED_TEXT, row_rect.x + 57, y - 8)
+                    draw_text(screen, f"{int(record.get('score', 0))}", 20, WHITE, row_rect.x + 60, y + 12)
                     date_value = str(record.get("date") or record.get("created_at") or "")
                     mode = str(record.get("mode", ""))
                     if "T" in date_value:
@@ -114,20 +136,11 @@ def show_history(
                     else:
                         short_date = format_short_date(date_value)
                         short_time = format_short_time(date_value)
-                    draw_text(screen, short_date, 16, GRAY, screen.get_width() // 2 + 60, y + 2)
-                    draw_text(screen, f"{short_time} {mode}", 14, GRAY, screen.get_width() // 2 + 60, y + 23)
+                    mode_text = game_mode_label(mode) if mode else "Unknown"
+                    draw_text(screen, short_date, 13, MUTED_TEXT, row_rect.right - 68, y - 8)
+                    draw_text(screen, f"{short_time} | {mode_text}", 12, MUTED_TEXT, row_rect.right - 68, y + 13)
 
-            draw_text(screen, "LEFT / RIGHT: Page", 20, GRAY, screen.get_width() // 2, screen.get_height() - 80)
-            draw_text(screen, f"S - Sort with: {sort_mode}", 20, GRAY, screen.get_width() // 2, screen.get_height() - 55)
-            draw_text(
-                screen,
-                f"F - Order: {'Up' if ascending else 'Down'}",
-                20,
-                GRAY,
-                screen.get_width() // 2,
-                screen.get_height() - 35,
-            )
-            draw_text(screen, "ESC to return", 20, GRAY, screen.get_width() // 2, screen.get_height() - 15)
+            draw_text(screen, "LEFT/RIGHT page   S sort   F order   ESC back", 13, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 20)
 
         pygame.display.update()
         clock.tick(FPS)
@@ -135,6 +148,9 @@ def show_history(
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise SystemExit
+            if event.type == pygame.VIDEORESIZE:
+                screen = handle_resize_event(event)
+                continue
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return
