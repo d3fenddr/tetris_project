@@ -16,9 +16,10 @@ import { MainMenu } from "./components/MainMenu";
 import { ModeSelect } from "./components/ModeSelect";
 import { useGameControls } from "./controls";
 import { GameAction, GameSnapshot, TetrisGame } from "./game/tetris";
-import { applyTelegramTheme, initTelegram, TelegramContext } from "./telegram";
+import { applyTelegramTheme, bindTelegramViewport, initTelegram, TelegramContext } from "./telegram";
 
 type Screen = "menu" | "account" | "mode" | "game" | "leaderboard";
+type LeaderboardMode = GameMode | "all";
 
 const SESSION_KEY = "tetris.webapp.session";
 const AUTH_MODE_KEY = "tetris.webapp.authMode";
@@ -68,25 +69,33 @@ export function App() {
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem(SOUND_KEY) !== "off");
   const [snapshot, setSnapshot] = useState<GameSnapshot>(() => gameRef.current.snapshot());
   const [leaderboard, setLeaderboard] = useState<LeaderboardItem[]>([]);
+  const [leaderboardMode, setLeaderboardMode] = useState<LeaderboardMode>("all");
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
 
-  const refreshLeaderboard = useCallback(async (leaderboardMode: GameMode | "all" = mode) => {
+  const refreshLeaderboard = useCallback(async (selectedMode: LeaderboardMode) => {
     setLeaderboardLoading(true);
     setLeaderboardError("");
     try {
-      setLeaderboard(await fetchLeaderboard(leaderboardMode));
+      setLeaderboard(await fetchLeaderboard(selectedMode));
     } catch (error) {
       setLeaderboardError(error instanceof Error ? error.message : "Leaderboard is unavailable.");
     } finally {
       setLeaderboardLoading(false);
     }
-  }, [mode]);
+  }, []);
+
+  const openLeaderboard = useCallback((selectedMode: LeaderboardMode = "all") => {
+    setLeaderboardMode(selectedMode);
+    refreshLeaderboard(selectedMode);
+    setScreen("leaderboard");
+  }, [refreshLeaderboard]);
 
   useEffect(() => {
     const context = initTelegram();
     applyTelegramTheme(context.theme);
+    const unbindViewport = bindTelegramViewport();
     setTelegram(context);
     if (context.isTelegram) {
       setAuthStatus("Telegram is ready.");
@@ -96,7 +105,8 @@ export function App() {
     } else {
       setAuthStatus("Open from Telegram or login with an existing account.");
     }
-    refreshLeaderboard();
+    refreshLeaderboard("all");
+    return unbindViewport;
   }, [refreshLeaderboard]);
 
   useEffect(() => {
@@ -250,8 +260,7 @@ export function App() {
           soundEnabled={soundEnabled}
           onPlay={() => setScreen(session ? "mode" : "account")}
           onLeaderboard={() => {
-            refreshLeaderboard(mode);
-            setScreen("leaderboard");
+            openLeaderboard("all");
           }}
           onAccount={() => setScreen("account")}
           onToggleSound={() => setSoundEnabled((value) => !value)}
@@ -285,14 +294,24 @@ export function App() {
           onChangeMode={() => setScreen("mode")}
           onMainMenu={openMenu}
           onLeaderboard={() => {
-            refreshLeaderboard(snapshot.mode);
-            setScreen("leaderboard");
+            openLeaderboard(snapshot.mode);
           }}
         />
       )}
 
       {screen === "leaderboard" && (
-        <Leaderboard rows={leaderboard} loading={leaderboardLoading} error={leaderboardError} onBack={openMenu} />
+        <Leaderboard
+          rows={leaderboard}
+          loading={leaderboardLoading}
+          error={leaderboardError}
+          activeMode={leaderboardMode}
+          currentUserId={session?.user.id}
+          onModeChange={(selectedMode) => {
+            setLeaderboardMode(selectedMode);
+            refreshLeaderboard(selectedMode);
+          }}
+          onBack={openMenu}
+        />
       )}
     </main>
   );

@@ -1,4 +1,6 @@
 :root {
+  --tg-viewport-height: 100dvh;
+  --tg-stable-viewport-height: 100dvh;
   --tg-bg: #080a10;
   --tg-text: #f7fbff;
   --bg: #080a10;
@@ -65,7 +67,9 @@ button:disabled {
   position: relative;
   z-index: 1;
   width: min(100vw, 1120px);
+  height: 100vh;
   height: 100dvh;
+  height: var(--tg-viewport-height);
   margin: 0 auto;
   padding:
     max(12px, env(safe-area-inset-top))
@@ -78,6 +82,7 @@ button:disabled {
   height: 100%;
   display: grid;
   place-items: center;
+  overflow-y: auto;
   background: url("/assets/images/main_menu.png") center / cover no-repeat;
   border: 1px solid rgba(255,255,255,0.08);
   box-shadow: inset 0 0 0 999px rgba(7, 9, 14, 0.52);
@@ -92,6 +97,12 @@ button:disabled {
   display: grid;
   gap: 12px;
   justify-items: center;
+}
+
+.leaderboard-screen {
+  align-self: center;
+  max-height: 100%;
+  overflow: auto;
 }
 
 .season-title {
@@ -232,15 +243,17 @@ h2 {
 
 .game-screen {
   height: 100%;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: clamp(5px, 1.2vh, 8px);
+  overflow: hidden;
 }
 
 .game-hud {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  gap: clamp(4px, 1vw, 6px);
 }
 
 .game-hud div,
@@ -253,7 +266,7 @@ h2 {
 
 .game-hud div {
   min-width: 0;
-  padding: 7px 5px;
+  padding: clamp(4px, 1.1vh, 7px) 4px;
   text-align: center;
 }
 
@@ -261,31 +274,34 @@ h2 {
 .stat-row span {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: clamp(9px, 2.6vw, 11px);
 }
 
 .game-hud strong,
 .stat-row strong,
 .leaderboard-row strong {
   color: var(--gold);
-  font-size: 15px;
+  font-size: clamp(12px, 3.2vw, 15px);
 }
 
 .play-area {
   min-height: 0;
+  width: 100%;
+  overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0, auto) 82px;
+  grid-template-columns: minmax(0, auto) clamp(62px, 21vw, 86px);
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: clamp(5px, 1.8vw, 8px);
 }
 
 .board-frame {
   position: relative;
-  width: min(70vw, 380px, calc((100dvh - 150px) / 2));
-  min-width: 214px;
+  width: min(66vw, 380px, calc((var(--tg-viewport-height) - 145px) / 2), calc(100vw - 128px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+  min-width: 0;
   aspect-ratio: 1 / 2;
-  padding: 6px;
+  justify-self: end;
+  padding: clamp(3px, 1.4vw, 6px);
   border: 1px solid rgba(255,255,255,0.18);
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(0,0,0,0.42));
@@ -335,31 +351,32 @@ h2 {
 
 .right-controls {
   display: grid;
-  gap: 8px;
+  gap: clamp(5px, 1.5vh, 8px);
   align-content: center;
+  width: 100%;
   touch-action: none;
 }
 
 .control-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: clamp(4px, 1vw, 6px);
 }
 
 .control {
-  min-height: 58px;
-  padding: 0 6px;
+  min-height: clamp(42px, 8.6vh, 58px);
+  padding: 0 4px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: clamp(10px, 2.8vw, 12px);
   font-weight: 950;
 }
 
 .control-down {
-  min-height: 72px;
+  min-height: clamp(50px, 10vh, 72px);
 }
 
 .control-pause {
-  min-height: 38px;
+  min-height: clamp(32px, 6vh, 38px);
   background: linear-gradient(180deg, #303645, #1e2330);
 }
 
@@ -371,15 +388,16 @@ h2 {
 
 .side-panel {
   display: grid;
-  grid-template-columns: 82px repeat(4, 1fr);
+  grid-template-columns: clamp(58px, 18vw, 82px) repeat(4, minmax(0, 1fr));
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: clamp(4px, 1.4vw, 8px);
+  padding: clamp(5px, 1.4vw, 8px);
+  min-width: 0;
 }
 
 .next-canvas {
-  width: 78px;
-  height: 62px;
+  width: clamp(54px, 17vw, 78px);
+  height: clamp(42px, 13vw, 62px);
   margin-top: 4px;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -401,7 +419,7 @@ h2 {
 .game-over-panel {
   position: fixed;
   left: 50%;
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: max(8px, env(safe-area-inset-bottom));
   transform: translateX(-50%);
   width: min(94vw, 430px);
   z-index: 4;
@@ -415,10 +433,96 @@ h2 {
 }
 
 .leaderboard-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
   padding: 9px 10px;
+}
+
+.leaderboard-header {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+
+.leaderboard-tabs {
+  width: 100%;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.leaderboard-tab {
+  flex: 0 0 auto;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: linear-gradient(180deg, var(--button-hover), var(--button));
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.leaderboard-tab.selected {
+  color: var(--gold);
+  border-color: rgba(255, 210, 94, 0.5);
+  background: linear-gradient(180deg, #73202a, #401119);
+}
+
+.leaderboard-rank {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text);
+  background: rgba(255,255,255,0.08);
+  font-weight: 950;
+}
+
+.leaderboard-row.gold .leaderboard-rank {
+  color: #191200;
+  background: var(--gold);
+}
+
+.leaderboard-row.silver .leaderboard-rank {
+  color: #12151b;
+  background: #d8dde8;
+}
+
+.leaderboard-row.bronze .leaderboard-rank {
+  color: #160d05;
+  background: #d49a5f;
+}
+
+.leaderboard-row.current-user {
+  border-color: rgba(255, 210, 94, 0.52);
+  background: rgba(255, 210, 94, 0.1);
+}
+
+.leaderboard-player,
+.leaderboard-score {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.leaderboard-player strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-player span,
+.leaderboard-score span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.leaderboard-score {
+  justify-items: end;
 }
 
 .error-text {
@@ -465,6 +569,50 @@ h2 {
   }
 }
 
+@media (max-width: 430px) {
+  .app-shell {
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(7px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(7px, env(safe-area-inset-left));
+  }
+
+  .menu-stack,
+  .mode-panel,
+  .account-panel,
+  .leaderboard-screen,
+  .game-over-panel {
+    width: min(94vw, 390px);
+  }
+
+  .game-hud {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .side-panel {
+    grid-template-columns: clamp(50px, 16vw, 64px) repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 360px) {
+  .play-area {
+    grid-template-columns: minmax(0, auto) 60px;
+  }
+
+  .board-frame {
+    width: min(64vw, calc((var(--tg-viewport-height) - 134px) / 2), calc(100vw - 108px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+  }
+
+  .side-panel {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .side-panel > div:first-child {
+    display: none;
+  }
+}
+
 @media (max-height: 690px) {
   .game-hud div {
     padding-top: 5px;
@@ -472,11 +620,11 @@ h2 {
   }
 
   .control {
-    min-height: 48px;
+    min-height: 42px;
   }
 
   .control-down {
-    min-height: 58px;
+    min-height: 50px;
   }
 
   .side-panel {

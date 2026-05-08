@@ -10,8 +10,12 @@ type TelegramWebApp = {
   initDataUnsafe?: { user?: TelegramUser };
   colorScheme?: "light" | "dark";
   themeParams?: Record<string, string>;
+  viewportHeight?: number;
+  viewportStableHeight?: number;
   ready: () => void;
   expand: () => void;
+  onEvent?: (eventType: "viewportChanged", eventHandler: () => void) => void;
+  offEvent?: (eventType: "viewportChanged", eventHandler: () => void) => void;
 };
 
 declare global {
@@ -55,4 +59,25 @@ export function applyTelegramTheme(theme: Record<string, string>): void {
   if (theme.text_color) root.style.setProperty("--tg-text", theme.text_color);
   if (theme.button_color) root.style.setProperty("--accent", theme.button_color);
   if (theme.hint_color) root.style.setProperty("--muted", theme.hint_color);
+}
+
+function applyTelegramViewport(webApp: TelegramWebApp | undefined): void {
+  const height = webApp?.viewportHeight || window.visualViewport?.height || window.innerHeight;
+  const stableHeight = webApp?.viewportStableHeight || height;
+  document.documentElement.style.setProperty("--tg-viewport-height", `${Math.floor(height)}px`);
+  document.documentElement.style.setProperty("--tg-stable-viewport-height", `${Math.floor(stableHeight)}px`);
+}
+
+export function bindTelegramViewport(): () => void {
+  const webApp = window.Telegram?.WebApp;
+  const update = () => applyTelegramViewport(webApp);
+  update();
+  webApp?.onEvent?.("viewportChanged", update);
+  window.visualViewport?.addEventListener("resize", update);
+  window.addEventListener("resize", update);
+  return () => {
+    webApp?.offEvent?.("viewportChanged", update);
+    window.visualViewport?.removeEventListener("resize", update);
+    window.removeEventListener("resize", update);
+  };
 }

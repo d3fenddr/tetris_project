@@ -3,13 +3,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import time
+from typing import Any
 from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -17,7 +20,7 @@ from backend.app.config import settings
 from backend.app.database import get_db
 from backend.app.db_resilience import run_db_operation_with_retry
 from backend.app.dependencies import get_current_user
-from backend.app.models import RefreshSession, User
+from backend.app.models import RefreshSession, Score, User
 from backend.app.schemas import (
     AuthResponse,
     TelegramInitDataRequest,
@@ -30,6 +33,16 @@ from backend.app.security import create_access_token, create_refresh_token, hash
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 TELEGRAM_NICKNAME_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
+VALID_BOT_COMMANDS = {"start", "play", "leaderboard", "my_stats", "help"}
+VALID_GAME_MODES = {"peaceful", "easy", "normal", "hard"}
+MODE_LABELS = {
+    "peaceful": "Peaceful",
+    "easy": "Easy",
+    "normal": "Normal",
+    "hard": "Hard",
+}
+logger = logging.getLogger(__name__)
+_BOT_USERNAME: str | None = None
 
 
 def _parse_init_data(init_data: str) -> dict[str, str]:
@@ -146,6 +159,240 @@ def _user_response(user: User) -> UserResponse:
         best_score=user.best_score or 0,
         current_season_rank=None,
     )
+
+
+def _telegram_api_url(method: str) -> str:
+    return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
+
+
+async def _get_bot_username() -> str:
+    global _BOT_USERNAME
+    if _BOT_USERNAME:
+        return _BOT_USERNAME
+    if not settings.telegram_bot_token:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(_telegram_api_url("getMe"))
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        logger.warning("Telegram getMe failed: %s", exc.__class__.__name__)
+        return ""
+    result = payload.get("result") if isinstance(payload, dict) else {}
+    username = result.get("username") if isinstance(result, dict) else ""
+    _BOT_USERNAME = str(username or "")
+    return _BOT_USERNAME
+
+
+def _message_from_update(update: dict[str, Any]) -> dict[str, Any] | None:
+    message = update.get("message") or update.get("edited_message")
+    return message if isinstance(message, dict) else None
+
+
+def _parse_command(text: str) -> tuple[str, str | None, list[str]] | None:
+    if not text.startswith("/"):
+        return None
+    first, *rest = text.strip().split()
+    command_part = first[1:]
+    if not command_part:
+        return None
+    if "@" in command_part:
+        command, mention = command_part.split("@", 1)
+    else:
+        command, mention = command_part, None
+    return command.lower(), mention.lower() if mention else None, rest
+
+
+async def _command_is_for_this_bot(mention: str | None) -> bool:
+    if not mention:
+        return True
+    username = await _get_bot_username()
+    if not username:
+        return False
+    return mention == username.lower()
+
+
+def _chat_id_and_type(message: dict[str, Any]) -> tuple[int | None, str]:
+    chat = message.get("chat")
+    if not isinstance(chat, dict):
+        return None, ""
+    chat_id = chat.get("id")
+    if not isinstance(chat_id, int):
+        return None, str(chat.get("type") or "")
+    return chat_id, str(chat.get("type") or "")
+
+
+def _webapp_keyboard() -> dict[str, Any] | None:
+    webapp_url = settings.telegram_webapp_url
+    if not webapp_url or "example.com" in webapp_url:
+        logger.warning("Telegram WebApp URL is not configured for production.")
+        return None
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Play Tetris",
+                    "web_app": {"url": webapp_url},
+                }
+            ]
+        ]
+    }
+
+
+async def _send_message(chat_id: int, text: str, reply_markup: dict[str, Any] | None = None) -> None:
+    if not settings.telegram_bot_token:
+        logger.warning("Telegram bot token is not configured; message was not sent.")
+        return
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.post(_telegram_api_url("sendMessage"), json=payload)
+            response.raise_for_status()
+    except Exception as exc:
+        logger.warning("Telegram sendMessage failed: %s", exc.__class__.__name__)
+
+
+def _clean_mode(args: list[str]) -> str | None:
+    if not args:
+        return None
+    mode = args[0].strip().lower()
+    return mode if mode in VALID_GAME_MODES else "invalid"
+
+
+def _leaderboard_rows(db: Session, chat_id: int | None, mode: str | None, limit: int = 10) -> list[Score]:
+    clean_mode = mode or "all"
+    query = db.query(Score).filter(Score.season == settings.current_season)
+    if chat_id is not None:
+        query = query.filter(Score.telegram_chat_id == chat_id)
+    if clean_mode != "all":
+        query = query.filter(Score.mode == clean_mode)
+
+    candidate_rows = (
+        query.order_by(Score.score.desc(), Score.created_at.asc(), Score.id.asc())
+        .all()
+    )
+    best_rows: list[Score] = []
+    seen_keys: set[tuple[int, str]] = set()
+    for row in candidate_rows:
+        key = (row.user_id, row.mode)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        best_rows.append(row)
+        if len(best_rows) >= limit:
+            break
+    return best_rows
+
+
+def _format_leaderboard(rows: list[Score], mode: str | None, is_group: bool) -> str:
+    if not rows:
+        return "No scores yet."
+    title = "Group leaderboard" if is_group else f"Season {settings.current_season} leaderboard"
+    if mode:
+        title = f"{title} - {MODE_LABELS[mode]}"
+    lines = [title]
+    for idx, row in enumerate(rows, start=1):
+        nickname = _display_bot_nickname(row.nickname_at_submission or row.user.nickname)
+        mode_label = MODE_LABELS.get(row.mode, row.mode.title())
+        lines.append(f"{idx}. {nickname} - {row.score} ({mode_label}, {row.lines} lines)")
+    return "\n".join(lines)
+
+
+def _display_bot_nickname(value: str | None) -> str:
+    clean = (value or "").strip().lstrip("@")
+    return clean or "unknown"
+
+
+async def _handle_bot_command(
+    command: str,
+    args: list[str],
+    chat_id: int,
+    chat_type: str,
+    db: Session,
+) -> None:
+    is_group = chat_type in {"group", "supergroup"}
+    if command in {"start", "play"}:
+        if is_group:
+            text = "Open Tetris Mini App and compete with this group."
+        elif command == "start":
+            text = "Welcome to Tetris. Open the Mini App to play."
+        else:
+            text = "Open Tetris Mini App to play."
+        await _send_message(chat_id, text, _webapp_keyboard())
+        return
+
+    if command == "leaderboard":
+        mode = _clean_mode(args)
+        if mode == "invalid":
+            await _send_message(chat_id, "Use /leaderboard, or /leaderboard peaceful|easy|normal|hard.")
+            return
+        group_chat_id = chat_id if is_group else None
+        rows = _leaderboard_rows(db, group_chat_id, mode)
+        await _send_message(chat_id, _format_leaderboard(rows, mode, is_group))
+        return
+
+    if command == "my_stats":
+        await _send_message(
+            chat_id,
+            "Open the Mini App and link your account first. Then your personal stats will appear in the app profile screen.",
+        )
+        return
+
+    if command == "help":
+        await _send_message(
+            chat_id,
+            "/start - launch button\n"
+            "/play - open Tetris Mini App\n"
+            "/leaderboard [mode] - global or group leaderboard\n"
+            "/my_stats - personal stats guidance\n"
+            "/help - show commands\n"
+            "Modes: peaceful, easy, normal, hard",
+        )
+
+
+@router.post("/bot/webhook/{secret}")
+async def telegram_bot_webhook(
+    secret: str,
+    update: dict[str, Any] = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    configured_secret = settings.telegram_webhook_secret
+    if not configured_secret or not hmac.compare_digest(secret, configured_secret):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook secret.")
+
+    message = _message_from_update(update)
+    if not message:
+        return {"ok": True}
+    text = message.get("text")
+    if not isinstance(text, str):
+        return {"ok": True}
+    parsed = _parse_command(text)
+    if not parsed:
+        return {"ok": True}
+
+    command, mention, args = parsed
+    if command not in VALID_BOT_COMMANDS:
+        return {"ok": True}
+    if not await _command_is_for_this_bot(mention):
+        return {"ok": True}
+
+    chat_id, chat_type = _chat_id_and_type(message)
+    if chat_id is None:
+        return {"ok": True}
+
+    try:
+        await _handle_bot_command(command, args, chat_id, chat_type, db)
+    except Exception as exc:
+        logger.warning("Telegram webhook command failed: %s", exc.__class__.__name__)
+        await _send_message(chat_id, "Bot command failed. Please try again later.")
+    return {"ok": True}
 
 
 @router.post("/validate-init-data", response_model=TelegramValidationResponse)

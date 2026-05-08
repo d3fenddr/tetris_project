@@ -52,6 +52,12 @@ class Settings:
     archived_season: int = _env_int("TETRIS_ARCHIVED_SEASON", 1)
     similar_nickname_threshold: float = float(os.getenv("TETRIS_SIMILAR_NICKNAME_THRESHOLD", "0.85"))
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_webhook_secret: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    telegram_webapp_url: str = (
+        os.getenv("TELEGRAM_WEBAPP_URL")
+        or os.getenv("MINI_APP_URL")
+        or "https://tetris-project-dun.vercel.app"
+    ).rstrip("/")
     telegram_auth_max_age_seconds: int = _env_int("TELEGRAM_AUTH_MAX_AGE_SECONDS", 3600)
     app_version: str = os.getenv("TETRIS_APP_VERSION", "0.1.0")
     debug_online_score_flow: bool = _env_bool("DEBUG_ONLINE_SCORE_FLOW", True)

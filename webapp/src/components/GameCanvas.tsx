@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { drawBoard, drawPreview } from "../game/renderer";
 import { BOARD_COLS, BOARD_ROWS, GameSnapshot } from "../game/tetris";
@@ -34,18 +34,48 @@ export function GameCanvas({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewRef = useRef<HTMLCanvasElement | null>(null);
+  const [resizeVersion, setResizeVersion] = useState(0);
+
+  useLayoutEffect(() => {
+    const canvases = [canvasRef.current, previewRef.current].filter(Boolean) as HTMLCanvasElement[];
+    if (!canvases.length) return;
+
+    const resizeCanvas = (canvas: HTMLCanvasElement) => {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width * dpr));
+      const height = Math.max(1, Math.round(rect.height * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    };
+
+    const observer = new ResizeObserver(() => {
+      canvases.forEach(resizeCanvas);
+      setResizeVersion((value) => value + 1);
+    });
+
+    canvases.forEach((canvas) => {
+      resizeCanvas(canvas);
+      observer.observe(canvas);
+    });
+    setResizeVersion((value) => value + 1);
+
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     drawBoard(canvas, snapshot);
-  }, [snapshot]);
+  }, [snapshot, resizeVersion]);
 
   useEffect(() => {
     const canvas = previewRef.current;
     if (!canvas) return;
     drawPreview(canvas, snapshot.next.shape, snapshot.next.color);
-  }, [snapshot.next]);
+  }, [snapshot.next, resizeVersion]);
 
   return (
     <section className="game-screen">
@@ -98,7 +128,7 @@ export function GameCanvas({
       {snapshot.status === "game_over" && (
         <div className="game-over-panel">
           <h2>Final Score {snapshot.score}</h2>
-          <p>{snapshot.mode} · {snapshot.lines} lines</p>
+          <p>{snapshot.mode} - {snapshot.lines} lines</p>
           {saveStatus && <strong>{saveStatus}</strong>}
           <div className="game-over-actions">
             <button onClick={onRestart}>Restart</button>

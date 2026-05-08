@@ -170,15 +170,31 @@ def telegram_group_leaderboard(
     db: Session = Depends(get_db),
     season: int = Query(default=settings.current_season, ge=1, le=99),
     limit: int = Query(default=20, ge=1, le=100),
+    mode: str | None = Query(default=None, min_length=1, max_length=30),
 ) -> list[LeaderboardItem]:
+    clean_mode = mode.lower() if mode else "all"
+    if clean_mode != "all" and clean_mode not in VALID_GAME_MODES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid leaderboard mode.")
+
     def operation() -> list[Score]:
-        return (
-            db.query(Score)
-            .filter(Score.telegram_chat_id == chat_id, Score.season == season)
-            .order_by(Score.score.desc(), Score.created_at.asc(), Score.id.asc())
-            .limit(limit)
+        query = db.query(Score).filter(Score.telegram_chat_id == chat_id, Score.season == season)
+        if clean_mode != "all":
+            query = query.filter(Score.mode == clean_mode)
+        candidate_rows = (
+            query.order_by(Score.score.desc(), Score.created_at.asc(), Score.id.asc())
             .all()
         )
+        best_rows: list[Score] = []
+        seen_keys: set[tuple[int, str]] = set()
+        for row in candidate_rows:
+            key = (row.user_id, row.mode)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            best_rows.append(row)
+            if len(best_rows) >= limit:
+                break
+        return best_rows
 
     rows = run_db_operation_with_retry(db, "scores/telegram-group", operation)
     return [_leaderboard_item(idx, row) for idx, row in enumerate(rows, start=1)]

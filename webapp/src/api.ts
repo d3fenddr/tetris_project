@@ -16,11 +16,14 @@ export type AuthSession = {
 
 export type LeaderboardItem = {
   rank: number;
+  user_id: number;
   nickname: string;
   score: number;
   lines: number;
   level: number;
   mode: string;
+  season: number;
+  created_at: string;
 };
 
 export type GameMode = "peaceful" | "easy" | "normal" | "hard";
