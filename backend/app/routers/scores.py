@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-import time
 
-from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.app.config import settings
 from backend.app.database import get_db
+from backend.app.db_resilience import (
+    DEFAULT_DB_UNAVAILABLE_DETAIL,
+    run_db_operation_with_retry,
+)
 from backend.app.dependencies import get_current_user
 from backend.app.models import Score, User
 from backend.app.schemas import LeaderboardItem, ScoreCreateRequest, ScoreResponse
@@ -16,8 +19,6 @@ from backend.app.schemas import LeaderboardItem, ScoreCreateRequest, ScoreRespon
 router = APIRouter(prefix="/scores", tags=["scores"])
 
 VALID_GAME_MODES = {"peaceful", "easy", "normal", "hard"}
-SCORE_WRITE_RETRIES = 2
-SCORE_WRITE_BACKOFF_SECONDS = 0.25
 
 
 def _leaderboard_item(rank: int, row: Score) -> LeaderboardItem:
@@ -54,65 +55,38 @@ def create_score(
     if payload.mode not in VALID_GAME_MODES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid game mode.")
 
-    score = Score(
-        user_id=current_user.id,
-        nickname_at_submission=current_user.nickname,
-        score=payload.score,
-        lines=payload.lines,
-        level=payload.level,
-        mode=payload.mode,
-        season=settings.current_season,
-        platform=payload.platform,
-        telegram_chat_id=payload.telegram_chat_id,
-        client_game_id=payload.client_game_id,
-    )
-    current_user.games_played = (current_user.games_played or 0) + 1
-    current_user.best_score = max(current_user.best_score or 0, payload.score)
-    current_user.updated_at = datetime.utcnow()
-    db.add(score)
-    for attempt in range(SCORE_WRITE_RETRIES + 1):
-        try:
-            db.commit()
-            db.refresh(score)
-            if settings.debug_online_score_flow:
-                print(f"[score-flow] Backend score saved: id={score.id}, user_id={current_user.id}")
-            return score
-        except IntegrityError:
-            db.rollback()
-            if settings.debug_online_score_flow:
-                print(f"[score-flow] Backend duplicate score submission: user_id={current_user.id}")
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Duplicate score submission for this game session.",
-            )
-        except OperationalError as exc:
-            db.rollback()
-            if attempt < SCORE_WRITE_RETRIES:
-                if settings.debug_online_score_flow:
-                    print(
-                        "[score-flow] Backend score save transient failure: "
-                        f"{exc.__class__.__name__}, retry {attempt + 1}/{SCORE_WRITE_RETRIES}"
-                    )
-                time.sleep(SCORE_WRITE_BACKOFF_SECONDS * (attempt + 1))
-                db.add(score)
-                continue
-            print(f"[score-flow] Backend score save failed after retries: {exc.__class__.__name__}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Score database is temporarily unavailable. Please try again.",
-            )
-        except SQLAlchemyError as exc:
-            db.rollback()
-            print(f"[score-flow] Backend score save failed: {exc.__class__.__name__}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Score database is temporarily unavailable. Please try again.",
-            )
+    def operation() -> Score:
+        score = Score(
+            user_id=current_user.id,
+            nickname_at_submission=current_user.nickname,
+            score=payload.score,
+            lines=payload.lines,
+            level=payload.level,
+            mode=payload.mode,
+            season=settings.current_season,
+            platform=payload.platform,
+            telegram_chat_id=payload.telegram_chat_id,
+            client_game_id=payload.client_game_id,
+        )
+        current_user.games_played = (current_user.games_played or 0) + 1
+        current_user.best_score = max(current_user.best_score or 0, payload.score)
+        current_user.updated_at = datetime.utcnow()
+        db.add(score)
+        db.commit()
+        db.refresh(score)
+        if settings.debug_online_score_flow:
+            print(f"[score-flow] Backend score saved: id={score.id}, user_id={current_user.id}")
+        return score
 
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Score database is temporarily unavailable. Please try again.",
-    )
+    try:
+        return run_db_operation_with_retry(db, "scores/create", operation, DEFAULT_DB_UNAVAILABLE_DETAIL)
+    except IntegrityError:
+        if settings.debug_online_score_flow:
+            print(f"[score-flow] Backend duplicate score submission: user_id={current_user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Duplicate score submission for this game session.",
+        )
 
 
 @router.get("/leaderboard", response_model=list[LeaderboardItem])
@@ -131,7 +105,7 @@ def global_leaderboard(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid leaderboard mode.")
         query = query.filter(Score.mode == clean_mode)
 
-    try:
+    def operation() -> list[Score]:
         candidate_rows = (
             query.order_by(
                 Score.score.desc(),
@@ -140,12 +114,9 @@ def global_leaderboard(
             )
             .all()
         )
-    except SQLAlchemyError as exc:
-        print(f"[score-flow] Backend leaderboard fetch failed: {exc.__class__.__name__}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Leaderboard database is temporarily unavailable. Please try again.",
-        )
+        return candidate_rows
+
+    candidate_rows = run_db_operation_with_retry(db, "scores/leaderboard", operation)
 
     best_rows: list[Score] = []
     seen_keys: set[tuple[int, str]] = set()
@@ -172,7 +143,7 @@ def my_history(
 ) -> list[Score]:
     if settings.debug_online_score_flow:
         print(f"[score-flow] Backend history fetch: user_id={current_user.id}, season={season}, limit={limit}")
-    try:
+    def operation() -> list[Score]:
         rows = (
             db.query(Score)
             .filter(Score.user_id == current_user.id, Score.season == season)
@@ -180,12 +151,9 @@ def my_history(
             .limit(limit)
             .all()
         )
-    except SQLAlchemyError as exc:
-        print(f"[score-flow] Backend history fetch failed: {exc.__class__.__name__}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="History database is temporarily unavailable. Please try again.",
-        )
+        return rows
+
+    rows = run_db_operation_with_retry(db, "scores/history", operation)
     if settings.debug_online_score_flow:
         print(f"[score-flow] Backend history rows: {len(rows)}")
     return rows
@@ -198,11 +166,14 @@ def telegram_group_leaderboard(
     season: int = Query(default=settings.current_season, ge=1, le=99),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[LeaderboardItem]:
-    rows = (
-        db.query(Score)
-        .filter(Score.telegram_chat_id == chat_id, Score.season == season)
-        .order_by(Score.score.desc(), Score.created_at.asc(), Score.id.asc())
-        .limit(limit)
-        .all()
-    )
+    def operation() -> list[Score]:
+        return (
+            db.query(Score)
+            .filter(Score.telegram_chat_id == chat_id, Score.season == season)
+            .order_by(Score.score.desc(), Score.created_at.asc(), Score.id.asc())
+            .limit(limit)
+            .all()
+        )
+
+    rows = run_db_operation_with_retry(db, "scores/telegram-group", operation)
     return [_leaderboard_item(idx, row) for idx, row in enumerate(rows, start=1)]

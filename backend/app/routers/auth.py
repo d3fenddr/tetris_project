@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.database import get_db
+from backend.app.db_resilience import run_db_operation_with_retry
 from backend.app.dependencies import get_current_user
 from backend.app.models import RefreshSession, Score, User
 from backend.app.nicknames import validate_available_nickname, validate_nickname_format, normalize_nickname
@@ -77,38 +78,42 @@ def _token_pair_for_user(db: Session, user: User) -> TokenPairResponse:
         expires_at=datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days),
     )
     db.add(refresh)
-    db.commit()
     return TokenPairResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 def _auth_response_for_user(db: Session, user: User, created: bool = False) -> AuthResponse:
     tokens = _token_pair_for_user(db, user)
-    db.refresh(user)
+    user_response = _user_response(db, user)
+    db.commit()
     return AuthResponse(
         access_token=tokens.access_token,
         refresh_token=tokens.refresh_token,
         created=created,
-        user=_user_response(db, user),
+        user=user_response,
     )
 
 
 @router.post("/register", response_model=AuthResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
-    try:
+    def operation() -> AuthResponse:
         nickname, normalized = validate_available_nickname(db, payload.nickname)
+
+        user = User(
+            nickname=nickname,
+            normalized_nickname=normalized,
+            password_hash=hash_password(payload.password),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+        db.flush()
+        return _auth_response_for_user(db, user, created=True)
+
+    try:
+        return run_db_operation_with_retry(db, "auth/register", operation)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-    user = User(
-        nickname=nickname,
-        normalized_nickname=normalized,
-        password_hash=hash_password(payload.password),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return _auth_response_for_user(db, user, created=True)
+    except IntegrityError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nickname is already taken.")
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -118,19 +123,21 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid nickname or password.")
 
-    normalized = normalize_nickname(clean_nickname)
-    user = db.query(User).filter(User.normalized_nickname == normalized).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found. Register first.")
-    if not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong password.")
+    def operation() -> AuthResponse:
+        normalized = normalize_nickname(clean_nickname)
+        user = db.query(User).filter(User.normalized_nickname == normalized).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found. Register first.")
+        if not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong password.")
+        return _auth_response_for_user(db, user, created=False)
 
-    return _auth_response_for_user(db, user, created=False)
+    return run_db_operation_with_retry(db, "auth/login", operation)
 
 
 @router.post("/enter", response_model=EnterResponse)
 def enter(payload: EnterRequest, db: Session = Depends(get_db)) -> EnterResponse:
-    try:
+    def operation() -> EnterResponse:
         try:
             clean_nickname = validate_nickname_format(payload.nickname)
         except ValueError as exc:
@@ -155,8 +162,7 @@ def enter(payload: EnterRequest, db: Session = Depends(get_db)) -> EnterResponse
                 updated_at=datetime.utcnow(),
             )
             db.add(user)
-            db.commit()
-            db.refresh(user)
+            db.flush()
             created = True
 
         auth_response = _auth_response_for_user(db, user, created=created)
@@ -167,15 +173,11 @@ def enter(payload: EnterRequest, db: Session = Depends(get_db)) -> EnterResponse
             created=auth_response.created,
             user=auth_response.user,
         )
-    except HTTPException:
-        raise
-    except SQLAlchemyError as exc:
-        db.rollback()
-        print(f"Database temporarily unavailable during auth enter: {exc.__class__.__name__}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database is temporarily unavailable. Please try again.",
-        )
+
+    try:
+        return run_db_operation_with_retry(db, "auth/enter", operation)
+    except IntegrityError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nickname is already taken.")
 
 
 @router.post("/logout")
@@ -184,20 +186,23 @@ def logout(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    token_hash = hash_refresh_token(payload.refresh_token)
-    refresh_session = (
-        db.query(RefreshSession)
-        .filter(
-            RefreshSession.user_id == current_user.id,
-            RefreshSession.refresh_token_hash == token_hash,
-            RefreshSession.revoked_at.is_(None),
+    def operation() -> dict:
+        token_hash = hash_refresh_token(payload.refresh_token)
+        refresh_session = (
+            db.query(RefreshSession)
+            .filter(
+                RefreshSession.user_id == current_user.id,
+                RefreshSession.refresh_token_hash == token_hash,
+                RefreshSession.revoked_at.is_(None),
+            )
+            .first()
         )
-        .first()
-    )
-    if refresh_session:
-        refresh_session.revoked_at = datetime.utcnow()
-        db.commit()
-    return {"ok": True}
+        if refresh_session:
+            refresh_session.revoked_at = datetime.utcnow()
+            db.commit()
+        return {"ok": True}
+
+    return run_db_operation_with_retry(db, "auth/logout", operation)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -205,7 +210,7 @@ def me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> UserResponse:
-    return _user_response(db, current_user)
+    return run_db_operation_with_retry(db, "auth/me", lambda: _user_response(db, current_user))
 
 
 @router.patch("/me/nickname", response_model=NicknameChangeResponse)
@@ -214,21 +219,26 @@ def change_nickname(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> NicknameChangeResponse:
-    try:
+    def operation() -> NicknameChangeResponse:
         nickname, normalized = validate_available_nickname(
             db,
             payload.nickname,
             exclude_user_id=current_user.id,
         )
+
+        current_user.nickname = nickname
+        current_user.normalized_nickname = normalized
+        current_user.updated_at = datetime.utcnow()
+        db.commit()
+        return NicknameChangeResponse(
+            id=current_user.id,
+            nickname=current_user.nickname,
+            message="Nickname updated. Future results will use the new nickname.",
+        )
+
+    try:
+        return run_db_operation_with_retry(db, "auth/change-nickname", operation)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-    current_user.nickname = nickname
-    current_user.normalized_nickname = normalized
-    current_user.updated_at = datetime.utcnow()
-    db.commit()
-    return NicknameChangeResponse(
-        id=current_user.id,
-        nickname=current_user.nickname,
-        message="Nickname updated. Future results will use the new nickname.",
-    )
+    except IntegrityError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nickname is already taken.")

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from urllib.parse import parse_qsl, urlsplit
+import logging
 
 from sqlalchemy import create_engine
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from backend.app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _is_sqlite_url(database_url: str) -> bool:
@@ -23,11 +25,7 @@ def _normalized_database_url(database_url: str) -> str:
     return database_url
 
 
-def _postgres_connect_args(database_url: str) -> dict:
-    parsed = urlsplit(database_url)
-    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    if any(key.lower() == "sslmode" for key, _value in query_pairs):
-        return {}
+def _postgres_connect_args() -> dict:
     return {"sslmode": "require"}
 
 
@@ -44,9 +42,10 @@ def _engine_kwargs(database_url: str) -> tuple[str, dict]:
                 "pool_recycle": 300,
                 "pool_size": 5,
                 "max_overflow": 10,
+                "pool_timeout": 10,
             }
         )
-        kwargs["connect_args"] = _postgres_connect_args(database_url)
+        kwargs["connect_args"] = _postgres_connect_args()
         return _normalized_database_url(database_url), kwargs
 
     return database_url, kwargs
@@ -56,6 +55,20 @@ database_url, engine_kwargs = _engine_kwargs(settings.database_url)
 engine = create_engine(database_url, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 Base = declarative_base()
+
+
+def is_postgres_database() -> bool:
+    return _is_postgres_url(settings.database_url)
+
+
+def check_database() -> bool:
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+        return True
+    except Exception as exc:
+        logger.warning("Database health check failed: %s", exc.__class__.__name__)
+        return False
 
 
 def _column_type(sqlite_type: str, postgres_type: str) -> str:

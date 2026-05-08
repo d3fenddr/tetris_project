@@ -24,6 +24,18 @@ uvicorn backend.app.main:app --reload
 
 Set `TETRIS_BACKEND_URL` for the desktop client if the backend is not on `http://127.0.0.1:8000`.
 
+Backend production env vars:
+```bash
+TETRIS_DATABASE_URL=postgresql://USER:PASSWORD@HOST/DBNAME
+TETRIS_SECRET_KEY=change-me
+TETRIS_ACCESS_TOKEN_EXPIRE_MINUTES=2880
+TETRIS_REFRESH_TOKEN_EXPIRE_DAYS=30
+TETRIS_DB_KEEPALIVE_ENABLED=true
+TETRIS_DB_KEEPALIVE_INTERVAL_SECONDS=240
+```
+
+For Render and Neon free tiers, configure an external uptime monitor to call `https://YOUR_RENDER_SERVICE.onrender.com/ping` every 5 minutes. Use `/health` instead if you also want the monitor to check and warm the database. The internal DB keepalive only runs while Render is awake, so it cannot prevent Render free tier sleeping by itself.
+
 ## Telegram Bot
 
 Set `TELEGRAM_BOT_TOKEN` and related values from `.env.example`, then run:
@@ -65,3 +77,14 @@ Place new desktop game images and audio inside these folders and reference them 
 4. Register or log in with nickname + password.
 5. Play a game; logged-in scores submit to Season 2.
 6. Open `Leaderboard` for Season 2 or `Season 1 Top 3` for archived winners.
+
+## Release/update workflow
+
+1. Update `APP_VERSION` in `src/version.py`.
+2. Commit the version change.
+3. Build the Windows exe with PyInstaller.
+4. Create a GitHub Release with a matching tag, for example `v1.0.1`.
+5. Upload the exe or zip to the release assets.
+6. Users with older versions will see an update prompt on startup.
+
+The current updater safely checks GitHub Releases and opens the release or asset download in the browser. It does not silently replace the running exe. Full silent replacement on Windows would require a separate updater executable.
