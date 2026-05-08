@@ -1,10 +1,8 @@
 import { useEffect, useRef } from "react";
-import type { RefObject } from "react";
 import { GameAction } from "./game/tetris";
 
 type ControlsOptions = {
   enabled: boolean;
-  boardRef: RefObject<HTMLElement>;
   onAction: (action: GameAction) => void;
 };
 
@@ -13,7 +11,6 @@ const INITIAL_DELAY = 145;
 const MOVE_REPEAT_INTERVAL = 65;
 const DOWN_REPEAT_INTERVAL = 45;
 const ROTATE_REPEAT_INTERVAL = 150;
-const SWIPE_MIN_DISTANCE = 32;
 
 function intervalForAction(action: GameAction): number {
   if (action === "down") return DOWN_REPEAT_INTERVAL;
@@ -21,9 +18,8 @@ function intervalForAction(action: GameAction): number {
   return MOVE_REPEAT_INTERVAL;
 }
 
-export function useGameControls({ enabled, boardRef, onAction }: ControlsOptions) {
+export function useGameControls({ enabled, onAction }: ControlsOptions) {
   const holdRef = useRef<{ action: GameAction | null; delayId?: number; intervalId?: number }>({ action: null });
-  const swipeStart = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
   const actionRef = useRef(onAction);
   actionRef.current = onAction;
 
@@ -86,41 +82,6 @@ export function useGameControls({ enabled, boardRef, onAction }: ControlsOptions
   useEffect(() => {
     if (!enabled) stopHold();
   }, [enabled]);
-
-  useEffect(() => {
-    const board = boardRef.current;
-    if (!board) return;
-    const pointerDown = (event: PointerEvent) => {
-      if ((event.target as HTMLElement).closest("[data-control-button]")) return;
-      swipeStart.current = { x: event.clientX, y: event.clientY, target: event.target };
-    };
-    const pointerUp = (event: PointerEvent) => {
-      const start = swipeStart.current;
-      swipeStart.current = null;
-      if (!enabled || !start) return;
-      const dx = event.clientX - start.x;
-      const dy = event.clientY - start.y;
-      if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN_DISTANCE) return;
-      if (Math.abs(dx) > Math.abs(dy)) {
-        actionRef.current(dx > 0 ? "right" : "left");
-      } else {
-        actionRef.current(dy > 0 ? "down" : "rotate");
-      }
-    };
-    const cancel = () => {
-      swipeStart.current = null;
-    };
-    board.addEventListener("pointerdown", pointerDown);
-    board.addEventListener("pointerup", pointerUp);
-    board.addEventListener("pointercancel", cancel);
-    board.addEventListener("pointerleave", cancel);
-    return () => {
-      board.removeEventListener("pointerdown", pointerDown);
-      board.removeEventListener("pointerup", pointerUp);
-      board.removeEventListener("pointercancel", cancel);
-      board.removeEventListener("pointerleave", cancel);
-    };
-  }, [boardRef, enabled]);
 
   return { startHold, stopHold, stopAllHolds: stopHold };
 }

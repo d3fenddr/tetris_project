@@ -122,17 +122,18 @@ export function App() {
     };
   }, []);
 
-  const playAudio = useCallback((track: "menu" | "game") => {
+  const playAudio = useCallback((track: "menu" | "game", restart = false) => {
     const menu = menuAudioRef.current;
     const game = gameAudioRef.current;
     if (!menu || !game) return;
+    const active = track === "menu" ? menu : game;
+    const inactive = track === "menu" ? game : menu;
+    if (restart) active.currentTime = 0;
     if (!soundEnabled) {
       menu.pause();
       game.pause();
       return;
     }
-    const active = track === "menu" ? menu : game;
-    const inactive = track === "menu" ? game : menu;
     inactive.pause();
     void active.play().catch(() => undefined);
   }, [soundEnabled]);
@@ -144,7 +145,9 @@ export function App() {
       gameAudioRef.current?.pause();
     } else if (screen === "game" && snapshot.status === "playing") {
       playAudio("game");
-    } else if (screen !== "game") {
+    } else if (screen === "game") {
+      gameAudioRef.current?.pause();
+    } else {
       playAudio("menu");
     }
   }, [soundEnabled, screen, snapshot.status, playAudio]);
@@ -156,7 +159,6 @@ export function App() {
 
   const { startHold, stopHold, stopAllHolds } = useGameControls({
     enabled: screen === "game" && snapshot.status === "playing",
-    boardRef,
     onAction: runAction,
   });
 
@@ -197,7 +199,7 @@ export function App() {
     gameRef.current.start(selectedMode);
     setSnapshot(gameRef.current.snapshot());
     setScreen("game");
-    playAudio("game");
+    playAudio("game", true);
   }, [mode, playAudio]);
 
   useEffect(() => {
@@ -247,8 +249,9 @@ export function App() {
 
   const openMenu = () => {
     stopAllHolds();
+    const returningFromGame = screen === "game";
     setScreen("menu");
-    playAudio("menu");
+    playAudio("menu", returningFromGame);
   };
 
   return (
@@ -285,11 +288,17 @@ export function App() {
         <GameCanvas
           snapshot={snapshot}
           boardRef={boardRef}
-          accountName={session?.user.nickname || "Guest"}
+          bestText={
+            session?.user.best_score
+              ? `${session.user.nickname} - ${session.user.best_score}`
+              : "Karim - 2200"
+          }
           saveStatus={saveStatus}
+          soundEnabled={soundEnabled}
           startHold={startHold}
           stopHold={stopHold}
           tap={runAction}
+          onToggleSound={() => setSoundEnabled((value) => !value)}
           onRestart={() => startGame(snapshot.mode)}
           onChangeMode={() => setScreen("mode")}
           onMainMenu={openMenu}

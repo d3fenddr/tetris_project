@@ -1,18 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { drawBoard, drawPreview } from "../game/renderer";
-import { BOARD_COLS, BOARD_ROWS, GameSnapshot } from "../game/tetris";
-import { RightControls } from "./RightControls";
-import { GameAction } from "../game/tetris";
+import { BOARD_COLS, BOARD_ROWS, GameAction, GameSnapshot } from "../game/tetris";
+import { MobileDPadControls } from "./MobileDPadControls";
 
 type Props = {
   snapshot: GameSnapshot;
   boardRef: RefObject<HTMLDivElement>;
-  accountName: string;
+  bestText: string;
   saveStatus: string;
+  soundEnabled: boolean;
   startHold: (action: GameAction) => void;
   stopHold: () => void;
   tap: (action: GameAction) => void;
+  onToggleSound: () => void;
   onRestart: () => void;
   onChangeMode: () => void;
   onMainMenu: () => void;
@@ -22,11 +23,13 @@ type Props = {
 export function GameCanvas({
   snapshot,
   boardRef,
-  accountName,
+  bestText,
   saveStatus,
+  soundEnabled,
   startHold,
   stopHold,
   tap,
+  onToggleSound,
   onRestart,
   onChangeMode,
   onMainMenu,
@@ -79,11 +82,32 @@ export function GameCanvas({
 
   return (
     <section className="game-screen">
+      <button
+        className="game-pause-button"
+        data-control-button
+        onPointerDown={() => tap("pause")}
+        disabled={snapshot.status === "game_over"}
+        aria-label="Pause game"
+      >
+        <span aria-hidden="true">II</span>
+      </button>
       <header className="game-hud">
-        <div><span>Score</span><strong>{snapshot.score}</strong></div>
-        <div><span>Lines</span><strong>{snapshot.lines}</strong></div>
-        <div><span>Combo</span><strong>{snapshot.combo ? `x${snapshot.combo}` : "-"}</strong></div>
-        <div><span>Mode</span><strong>{snapshot.mode}</strong></div>
+        <div className="hud-card hud-main">
+          <div className="hud-score-main">
+            <span>Score</span>
+            <strong>{snapshot.score}</strong>
+          </div>
+          <div className="hud-meta">
+            <span>Mode</span>
+            <strong>{snapshot.mode}</strong>
+            <small>Level {snapshot.level}</small>
+            <small>Best: {bestText}</small>
+          </div>
+        </div>
+        <div className="hud-card next-preview-card">
+          <span>Next</span>
+          <canvas ref={previewRef} className="next-canvas" width={120} height={100} />
+        </div>
       </header>
       <div className="play-area" ref={boardRef}>
         <div className="board-frame">
@@ -101,30 +125,31 @@ export function GameCanvas({
             </div>
           )}
           {snapshot.status !== "playing" && (
-            <div className="board-overlay">
-              <strong>{snapshot.status === "game_over" ? "Game over" : snapshot.status === "paused" ? "Paused" : "Ready"}</strong>
-              <span>{snapshot.status === "paused" ? "Tap Resume to continue" : "Choose Restart to play"}</span>
+            <div className={`board-overlay ${snapshot.status === "paused" ? "pause-overlay" : ""}`}>
+              {snapshot.status === "paused" ? (
+                <div className="pause-menu" role="dialog" aria-label="Pause menu">
+                  <strong>Paused</strong>
+                  <button onPointerDown={() => tap("pause")}>Continue</button>
+                  <button onPointerDown={onToggleSound}>Music: {soundEnabled ? "On" : "Off"}</button>
+                  <button onPointerDown={onRestart}>Restart</button>
+                  <button onPointerDown={onMainMenu}>Exit</button>
+                </div>
+              ) : (
+                <>
+                  <strong>{snapshot.status === "game_over" ? "Game over" : "Ready"}</strong>
+                  <span>Choose Restart to play</span>
+                </>
+              )}
             </div>
           )}
         </div>
-        <RightControls
-          disabled={snapshot.status !== "playing"}
-          paused={snapshot.status === "paused"}
-          startHold={startHold}
-          stopHold={stopHold}
-          tap={tap}
-        />
       </div>
-      <aside className="side-panel">
-        <div>
-          <span>Next</span>
-          <canvas ref={previewRef} className="next-canvas" width={120} height={100} />
-        </div>
-        <div className="stat-row"><span>Score</span><strong>{snapshot.score}</strong></div>
-        <div className="stat-row"><span>Lines</span><strong>{snapshot.lines}</strong></div>
-        <div className="stat-row"><span>Level</span><strong>{snapshot.level}</strong></div>
-        <div className="stat-row"><span>Player</span><strong>{accountName}</strong></div>
-      </aside>
+      <MobileDPadControls
+        disabled={snapshot.status !== "playing"}
+        startHold={startHold}
+        stopHold={stopHold}
+        tap={tap}
+      />
       {snapshot.status === "game_over" && (
         <div className="game-over-panel">
           <h2>Final Score {snapshot.score}</h2>
