@@ -4,7 +4,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
@@ -76,6 +76,11 @@ def health() -> dict:
 @app.get("/ping")
 def ping() -> dict:
     return {"status": "ok"}
+
+
+@app.head("/ping")
+def ping_head() -> Response:
+    return Response(status_code=status.HTTP_200_OK)
 
 
 @app.get("/version")
