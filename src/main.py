@@ -21,6 +21,7 @@ from src.services.backend_client import BackendClient
 from src.services.google_sheet_service import GoogleSheetService
 from src.services.score_service import ScoreService
 from src.services.session_service import SessionService
+from src.services.update_service import BackgroundUpdateChecker
 from src.state import AppState
 from src.ui.history import show_history
 from src.ui.leaderboard import show_leaderboard, show_season1_top3
@@ -52,6 +53,7 @@ def run() -> None:
         backend_client=backend_client,
     )
     account_service = AccountService(session_service, backend_client)
+    update_checker = BackgroundUpdateChecker()
 
     state = AppState.from_storage(session_service.load())
     saved_account = account_service.load_account()
@@ -107,10 +109,11 @@ def run() -> None:
     if not state.account:
         account_startup_screen(screen, clock, state, account_service, persist_state)
     persist_state()
+    update_checker.start()
 
     while True:
         play_music(assets.menu_music_path)
-        action = show_main_menu(screen, clock, state, assets.background_img)
+        action = show_main_menu(screen, clock, state, assets.background_img, update_checker)
         persist_state()
 
         if action == "play":
@@ -122,7 +125,7 @@ def run() -> None:
             stop_music()
 
             def open_settings() -> None:
-                settings_menu(screen, clock, state, apply_volume, persist_state)
+                settings_menu(screen, clock, state, apply_volume, persist_state, update_checker)
 
             def open_pause(draw_frame: Callable[[], None], score: int) -> Optional[str]:
                 return pause_menu(
@@ -155,7 +158,7 @@ def run() -> None:
         elif action == "season 1 top 3":
             show_season1_top3(screen, clock, score_service)
         elif action == "settings":
-            settings_menu(screen, clock, state, apply_volume, persist_state)
+            settings_menu(screen, clock, state, apply_volume, persist_state, update_checker)
         elif action == "leaderboard":
             show_leaderboard(screen, clock, score_service)
         elif action == "exit":

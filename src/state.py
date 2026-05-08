@@ -40,6 +40,7 @@ class AppState:
     game_mode: str = DEFAULT_GAME_MODE
     account: Optional[AccountSession] = None
     last_error: str = ""
+    update_prompt_seen: bool = False
 
     @classmethod
     def from_storage(cls, data: Dict[str, Any]) -> "AppState":

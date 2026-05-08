@@ -26,9 +26,12 @@ from src.config import (
 )
 from src.config import GAME_MODE_ORDER
 from src.game.modes import game_mode_description, game_mode_label, next_game_mode
+from src.services.update_service import BackgroundUpdateChecker
 from src.state import AppState
 from src.utils.layout import handle_resize_event
 from src.utils.ui_helpers import draw_button, draw_image_cover, draw_panel, draw_text, draw_text_shadow
+from src.ui.update_prompt import show_update_prompt
+from src.version import APP_VERSION
 
 
 def show_main_menu(
@@ -36,6 +39,7 @@ def show_main_menu(
     clock: pygame.time.Clock,
     state: AppState,
     background_img: pygame.Surface,
+    update_checker: BackgroundUpdateChecker | None = None,
 ) -> str:
     button_labels = ["Play", "Profile", "Leaderboard", "Season 1 Top 3", "History", "Settings", "Exit"]
     last_click_ms = 0
@@ -81,7 +85,16 @@ def show_main_menu(
             )
             button_rects.append((label, rect))
 
+        draw_text(screen, f"v{APP_VERSION}", 14, MUTED_TEXT, screen.get_width() - 38, screen.get_height() - 20)
         pygame.display.update()
+
+        if update_checker and not state.update_prompt_seen:
+            result = update_checker.result()
+            if result:
+                state.update_prompt_seen = True
+                if result.update_available:
+                    show_update_prompt(screen, clock, result)
+
         clock.tick(FPS)
 
         for event in pygame.event.get():

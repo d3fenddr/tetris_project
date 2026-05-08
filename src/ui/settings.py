@@ -17,9 +17,12 @@ from src.config import (
     SETTINGS_PANEL_MAX_WIDTH,
     WHITE,
 )
+from src.services.update_service import BackgroundUpdateChecker
 from src.state import AppState
 from src.utils.layout import content_rect, handle_resize_event
 from src.utils.ui_helpers import draw_button, draw_panel, draw_text, draw_text_shadow
+from src.ui.update_prompt import show_update_prompt
+from src.version import APP_VERSION
 
 
 def settings_menu(
@@ -28,8 +31,11 @@ def settings_menu(
     state: AppState,
     apply_volume: Callable[[], None],
     on_state_changed: Callable[[], None],
+    update_checker: BackgroundUpdateChecker | None = None,
 ) -> None:
     last_click_ms = 0
+    update_status = ""
+    manual_check_pending = False
 
     def change_volume(delta: int) -> None:
         state.volume_percent = min(100, max(0, state.volume_percent + delta))
@@ -45,7 +51,7 @@ def settings_menu(
         screen.fill(BLACK)
         draw_text_shadow(screen, "Settings", 36, WHITE, screen.get_width() // 2, 62)
 
-        panel = content_rect(screen, SETTINGS_PANEL_MAX_WIDTH, 300, y=122)
+        panel = content_rect(screen, SETTINGS_PANEL_MAX_WIDTH, 390, y=112)
         draw_panel(screen, panel, PANEL_BG, PANEL_BORDER)
         draw_text(screen, "Audio", 24, WHITE, panel.centerx, panel.y + 38)
         draw_text(screen, "Music Volume", 16, MUTED_TEXT, panel.centerx, panel.y + 82)
@@ -63,6 +69,8 @@ def settings_menu(
         plus_rect = pygame.Rect(panel.right - 117, panel.y + 190, 72, 38)
         toggle_rect = pygame.Rect(0, 0, MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT)
         toggle_rect.center = (panel.centerx, panel.y + 260)
+        update_rect = pygame.Rect(0, 0, MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT)
+        update_rect.center = (panel.centerx, panel.y + 332)
 
         draw_button(screen, minus_rect, "-10", 20, hovered=minus_rect.collidepoint(mouse_pos))
         draw_button(screen, plus_rect, "+10", 20, hovered=plus_rect.collidepoint(mouse_pos))
@@ -74,9 +82,33 @@ def settings_menu(
             hovered=toggle_rect.collidepoint(mouse_pos),
             selected=state.music_enabled,
         )
+        draw_text(screen, f"Version v{APP_VERSION}", 15, MUTED_TEXT, panel.centerx, panel.y + 300)
+        draw_button(
+            screen,
+            update_rect,
+            "Checking..." if manual_check_pending else "Check for updates",
+            18,
+            hovered=update_rect.collidepoint(mouse_pos),
+            enabled=update_checker is not None and not manual_check_pending,
+        )
+        if update_status:
+            draw_text(screen, update_status, 14, MUTED_TEXT, panel.centerx, panel.y + 372)
 
         draw_text(screen, "LEFT/RIGHT volume   M music   ESC back", 14, MUTED_TEXT, screen.get_width() // 2, screen.get_height() - 28)
         pygame.display.update()
+
+        if update_checker and manual_check_pending:
+            result = update_checker.result()
+            if result:
+                manual_check_pending = False
+                if result.update_available:
+                    update_status = "Update available."
+                    show_update_prompt(screen, clock, result)
+                elif result.error:
+                    update_status = "Could not check for updates."
+                else:
+                    update_status = "You are using the latest version."
+
         clock.tick(FPS)
 
         for event in pygame.event.get():
@@ -105,3 +137,7 @@ def settings_menu(
                     change_volume(10)
                 elif toggle_rect.collidepoint(event.pos):
                     toggle_music()
+                elif update_rect.collidepoint(event.pos) and update_checker and not manual_check_pending:
+                    update_checker.start(force=True)
+                    manual_check_pending = True
+                    update_status = ""
