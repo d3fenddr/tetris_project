@@ -3,7 +3,8 @@
 ## Env vars
 - `TELEGRAM_BOT_TOKEN` (required)
 - `BACKEND_URL` (default: `http://localhost:8000`)
-- `MINI_APP_URL` (Mini App HTTPS URL)
+- `TELEGRAM_WEBAPP_URL` (Mini App HTTPS URL)
+- `MINI_APP_URL` (legacy fallback if `TELEGRAM_WEBAPP_URL` is not set)
 
 ## Run
 ```bash
@@ -17,4 +18,3 @@ python telegram_bot/bot.py
 - `/leaderboard`
 - `/my_stats`
 - `/help`
-

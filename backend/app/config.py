@@ -21,6 +21,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_list(name: str, default: str = "") -> list[str]:
+    raw = os.getenv(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 def _default_db_keepalive_enabled() -> bool:
     database_url = os.getenv("TETRIS_DATABASE_URL", "sqlite:///./tetris.db")
     return database_url.startswith(("postgresql://", "postgresql+psycopg2://", "postgres://"))
@@ -41,6 +46,7 @@ class Settings:
     debug_online_score_flow: bool = _env_bool("DEBUG_ONLINE_SCORE_FLOW", True)
     db_keepalive_enabled: bool = _env_bool("TETRIS_DB_KEEPALIVE_ENABLED", _default_db_keepalive_enabled())
     db_keepalive_interval_seconds: int = _env_int("TETRIS_DB_KEEPALIVE_INTERVAL_SECONDS", 240)
+    cors_origins: tuple[str, ...] = tuple(_env_list("TETRIS_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"))
 
 
 settings = Settings()

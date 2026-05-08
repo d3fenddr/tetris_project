@@ -5,6 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
@@ -58,6 +59,14 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Tetris Backend API", version=settings.app_version, lifespan=lifespan)
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.include_router(auth.router)
 app.include_router(scores.router)
 app.include_router(telegram.router)

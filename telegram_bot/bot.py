@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-MINI_APP_URL = os.getenv("MINI_APP_URL", "https://example.com")
+TELEGRAM_WEBAPP_URL = os.getenv("TELEGRAM_WEBAPP_URL") or os.getenv("MINI_APP_URL", "https://example.com")
 
 
 async def _fetch_json(url: str) -> Any:
@@ -21,7 +21,7 @@ async def _fetch_json(url: str) -> Any:
 
 def _play_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(text="Play Tetris", web_app=WebAppInfo(url=MINI_APP_URL))]]
+        [[InlineKeyboardButton(text="Play Tetris", web_app=WebAppInfo(url=TELEGRAM_WEBAPP_URL))]]
     )
 
 
@@ -61,7 +61,7 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     lines = []
     for idx, row in enumerate(rows[:10], start=1):
-        username = row.get("username", "unknown")
+        username = row.get("nickname") or row.get("username", "unknown")
         score = row.get("score", 0)
         lines.append(f"{idx}. {username} - {score}")
     await update.message.reply_text("\n".join(lines))
@@ -102,4 +102,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

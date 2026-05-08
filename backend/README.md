@@ -3,7 +3,7 @@
 ## Features
 - Auth: `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `PATCH /auth/me/nickname`
 - Scores: `POST /scores`, `GET /scores/leaderboard?season=2`, `GET /scores/history/me?season=2`, `GET /scores/telegram/group/{chat_id}`
-- Telegram: `POST /telegram/validate-init-data`, `POST /telegram/link-account`
+- Telegram: `POST /telegram/validate-init-data`, `POST /telegram/auth`, `POST /telegram/link-account`
 - Utility: `GET /ping`, `GET /health`, `GET /version`
 
 Accounts use nickname + password only. Nicknames are normalized case-insensitively, must be unique, and similar nicknames are blocked with a simple `difflib` similarity check.
@@ -17,6 +17,7 @@ Season 2 is the active database-backed leaderboard. Season 1 remains archived in
 - `TETRIS_REFRESH_TOKEN_EXPIRE_DAYS=30`
 - `TETRIS_DB_KEEPALIVE_ENABLED=true`
 - `TETRIS_DB_KEEPALIVE_INTERVAL_SECONDS=240`
+- `TETRIS_CORS_ORIGINS=http://localhost:5173,https://your-mini-app-host.example`
 - `TETRIS_CURRENT_SEASON` (default: `2`)
 - `TETRIS_ARCHIVED_SEASON` (default: `1`)
 - `TETRIS_SIMILAR_NICKNAME_THRESHOLD` (default: `0.85`)

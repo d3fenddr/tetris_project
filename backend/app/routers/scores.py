@@ -21,11 +21,16 @@ router = APIRouter(prefix="/scores", tags=["scores"])
 VALID_GAME_MODES = {"peaceful", "easy", "normal", "hard"}
 
 
+def _display_nickname(value: str | None) -> str:
+    clean = (value or "").strip().lstrip("@")
+    return clean or "unknown"
+
+
 def _leaderboard_item(rank: int, row: Score) -> LeaderboardItem:
     return LeaderboardItem(
         rank=rank,
         user_id=row.user_id,
-        nickname=row.nickname_at_submission or row.user.nickname,
+        nickname=_display_nickname(row.nickname_at_submission or row.user.nickname),
         score=row.score,
         mode=row.mode,
         lines=row.lines,

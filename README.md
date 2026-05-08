@@ -52,6 +52,10 @@ npm install
 npm run dev
 ```
 
+Set `VITE_BACKEND_URL` for the Mini App frontend. When deploying the Telegram Mini App, host `webapp/dist/` over HTTPS, set the bot `TELEGRAM_WEBAPP_URL`, and add the frontend origin to backend `TETRIS_CORS_ORIGINS`.
+
+The Mini App supports Telegram initData authentication through the backend, desktop keyboard controls, mobile swipe gestures, and on-screen hold controls for left/right/down movement.
+
 ## Asset Folders
 
 - Images: `assets/images/`
