@@ -223,19 +223,19 @@ def _chat_id_and_type(message: dict[str, Any]) -> tuple[int | None, str]:
     return chat_id, str(chat.get("type") or "")
 
 
-def _webapp_keyboard() -> dict[str, Any] | None:
+def _webapp_keyboard(is_group: bool = False) -> dict[str, Any] | None:
     webapp_url = settings.telegram_webapp_url
     if not webapp_url or "example.com" in webapp_url:
         logger.warning("Telegram WebApp URL is not configured for production.")
         return None
+    button: dict[str, Any] = {"text": "Play Tetris"}
+    if is_group:
+        button["url"] = webapp_url
+    else:
+        button["web_app"] = {"url": webapp_url}
     return {
         "inline_keyboard": [
-            [
-                {
-                    "text": "Play Tetris",
-                    "web_app": {"url": webapp_url},
-                }
-            ]
+            [button]
         ]
     }
 
@@ -254,9 +254,16 @@ async def _send_message(chat_id: int, text: str, reply_markup: dict[str, Any] | 
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.post(_telegram_api_url("sendMessage"), json=payload)
-            response.raise_for_status()
-    except Exception as exc:
-        logger.warning("Telegram sendMessage failed: %s", exc.__class__.__name__)
+        if response.is_success:
+            logger.info("Telegram sendMessage succeeded: status=%s chat_id=%s", response.status_code, chat_id)
+            return
+        logger.warning(
+            "Telegram sendMessage failed: status=%s body=%s",
+            response.status_code,
+            response.text[:500],
+        )
+    except httpx.RequestError as exc:
+        logger.warning("Telegram sendMessage request failed: %s", exc.__class__.__name__)
 
 
 def _clean_mode(args: list[str]) -> str | None:
@@ -321,11 +328,9 @@ async def _handle_bot_command(
     if command in {"start", "play"}:
         if is_group:
             text = "Open Tetris Mini App and compete with this group."
-        elif command == "start":
-            text = "Welcome to Tetris. Open the Mini App to play."
         else:
-            text = "Open Tetris Mini App to play."
-        await _send_message(chat_id, text, _webapp_keyboard())
+            text = "Welcome to Tetris. Open the Mini App to play."
+        await _send_message(chat_id, text, _webapp_keyboard(is_group))
         return
 
     if command == "leaderboard":
