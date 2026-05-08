@@ -3,6 +3,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://tetris-project-dun.vercel.app",
+)
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -21,9 +27,14 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _env_list(name: str, default: str = "") -> list[str]:
-    raw = os.getenv(name, default)
-    return [item.strip() for item in raw.split(",") if item.strip()]
+def _env_list(name: str, defaults: tuple[str, ...] = ()) -> list[str]:
+    raw = os.getenv(name, "")
+    values = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+    for item in defaults:
+        clean = item.strip().rstrip("/")
+        if clean and clean not in values:
+            values.append(clean)
+    return values
 
 
 def _default_db_keepalive_enabled() -> bool:
@@ -46,7 +57,7 @@ class Settings:
     debug_online_score_flow: bool = _env_bool("DEBUG_ONLINE_SCORE_FLOW", True)
     db_keepalive_enabled: bool = _env_bool("TETRIS_DB_KEEPALIVE_ENABLED", _default_db_keepalive_enabled())
     db_keepalive_interval_seconds: int = _env_int("TETRIS_DB_KEEPALIVE_INTERVAL_SECONDS", 240)
-    cors_origins: tuple[str, ...] = tuple(_env_list("TETRIS_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"))
+    cors_origins: tuple[str, ...] = tuple(_env_list("TETRIS_CORS_ORIGINS", DEFAULT_CORS_ORIGINS))
 
 
 settings = Settings()

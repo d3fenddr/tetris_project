@@ -1,4 +1,5 @@
-const API_BASE = (import.meta.env.VITE_BACKEND_URL || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+const IS_DEV = import.meta.env.DEV;
 
 export type AuthUser = {
   id: number;
@@ -24,6 +25,67 @@ export type LeaderboardItem = {
 
 export type GameMode = "peaceful" | "easy" | "normal" | "hard";
 
+export class ApiError extends Error {
+  status?: number;
+  detail?: string;
+
+  constructor(message: string, status?: number, detail?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function apiUrl(path: string): string {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+async function responseDetail(response: Response): Promise<string> {
+  const text = await response.text().catch(() => "");
+  if (!text) return "";
+  try {
+    const payload = JSON.parse(text);
+    return String(payload.detail || payload.message || text);
+  } catch {
+    return text;
+  }
+}
+
+function networkMessage(endpoint: string): string {
+  return `Cannot reach backend at ${API_BASE}${endpoint}. Check VITE_BACKEND_URL, Render availability, HTTPS, and CORS.`;
+}
+
+async function requestJson<T>(
+  endpoint: string,
+  init: RequestInit = {},
+  friendlyName = "Request",
+): Promise<T> {
+  const url = apiUrl(endpoint);
+  if (IS_DEV) console.info(`[api] ${init.method || "GET"} ${url}`);
+
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    const message = networkMessage(endpoint);
+    if (IS_DEV) console.error(`[api] ${message}`, error);
+    throw new ApiError(message);
+  }
+
+  if (!response.ok) {
+    const detail = await responseDetail(response);
+    const message =
+      response.status === 401
+        ? `${friendlyName} failed: unauthorized. Please log in again.`
+        : `${friendlyName} failed: backend returned ${response.status}${detail ? ` - ${detail}` : ""}`;
+    if (IS_DEV) console.error(`[api] ${message}`);
+    throw new ApiError(message, response.status, detail);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 function cleanNickname(value: string): string {
   const clean = value.trim().replace(/^@+/, "");
   return clean || "unknown";
@@ -38,33 +100,38 @@ function mapSession(payload: any): AuthSession {
 }
 
 export async function authenticateTelegram(initData: string): Promise<AuthSession> {
-  const response = await fetch(`${API_BASE}/telegram/auth`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ init_data: initData }),
-  });
-  if (!response.ok) throw new Error("Telegram authentication failed");
-  return mapSession(await response.json());
+  const payload = await requestJson<any>(
+    "/telegram/auth",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ init_data: initData }),
+    },
+    "Telegram sign-in",
+  );
+  return mapSession(payload);
 }
 
 export async function loginWithPassword(nickname: string, password: string): Promise<AuthSession> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nickname, password }),
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || "Login failed");
-  }
-  return mapSession(await response.json());
+  const payload = await requestJson<any>(
+    "/auth/login",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nickname, password }),
+    },
+    "Login",
+  );
+  return mapSession(payload);
 }
 
 export async function fetchLeaderboard(mode: GameMode | "all" = "normal"): Promise<LeaderboardItem[]> {
   const queryMode = mode === "all" ? "all" : mode;
-  const response = await fetch(`${API_BASE}/scores/leaderboard?season=2&limit=10&mode=${queryMode}`);
-  if (!response.ok) throw new Error("Leaderboard unavailable");
-  const rows = (await response.json()) as LeaderboardItem[];
+  const rows = await requestJson<LeaderboardItem[]>(
+    `/scores/leaderboard?season=2&limit=10&mode=${encodeURIComponent(queryMode)}`,
+    {},
+    "Leaderboard",
+  );
   return rows.map((row) => ({ ...row, nickname: cleanNickname(row.nickname) }));
 }
 
@@ -88,31 +155,29 @@ export async function submitScore(
     client_game_id: payload.clientGameId,
   };
 
-  const response = await fetch(`${API_BASE}/scores`, {
+  const init: RequestInit = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify(body),
-  });
+  };
 
-  if (!response.ok) {
-    if (response.status === 401) throw new Error("unauthorized");
-    if (response.status === 503) {
+  try {
+    await requestJson<unknown>("/scores", init, "Score save");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) return;
+    if (error instanceof ApiError && error.status === 503) {
       await new Promise((resolve) => window.setTimeout(resolve, 600));
-      const retry = await fetch(`${API_BASE}/scores`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(body),
-      });
-      if (retry.ok || retry.status === 409) return;
-      if (retry.status === 401) throw new Error("unauthorized");
+      try {
+        await requestJson<unknown>("/scores", init, "Score save retry");
+        return;
+      } catch (retryError) {
+        if (retryError instanceof ApiError && retryError.status === 409) return;
+        throw retryError;
+      }
     }
-    if (response.status === 409) return;
-    throw new Error("Score was not saved");
+    throw error;
   }
 }

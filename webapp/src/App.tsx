@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   authenticateTelegram,
+  ApiError,
   AuthSession,
   fetchLeaderboard,
   GameMode,
@@ -76,8 +77,8 @@ export function App() {
     setLeaderboardError("");
     try {
       setLeaderboard(await fetchLeaderboard(leaderboardMode));
-    } catch {
-      setLeaderboardError("Leaderboard is unavailable.");
+    } catch (error) {
+      setLeaderboardError(error instanceof Error ? error.message : "Leaderboard is unavailable.");
     } finally {
       setLeaderboardLoading(false);
     }
@@ -160,8 +161,8 @@ export function App() {
       persistSession(authSession, "telegram");
       setSession(authSession);
       setAuthStatus(`Signed in as ${authSession.user.nickname}`);
-    } catch {
-      setAuthStatus("Telegram sign-in failed. Please try again.");
+    } catch (error) {
+      setAuthStatus(error instanceof Error ? error.message : "Telegram sign-in failed. Please try again.");
     }
   }, [telegram]);
 
@@ -224,7 +225,13 @@ export function App() {
         refreshLeaderboard(snapshot.mode);
       })
       .catch((error: any) => {
-        setSaveStatus(error?.message === "unauthorized" ? "Score was not saved. Please log in again." : "Score was not saved. Please try again later.");
+        setSaveStatus(
+          error instanceof ApiError && error.status === 401
+            ? "Score was not saved. Please log in again."
+            : error instanceof Error
+              ? error.message
+              : "Score was not saved. Please try again later.",
+        );
       });
   }, [snapshot, session, telegram, refreshLeaderboard]);
 

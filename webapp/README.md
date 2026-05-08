@@ -11,7 +11,7 @@ npm run dev
 
 Set the backend URL for local development:
 ```bash
-VITE_BACKEND_URL=http://localhost:8000
+VITE_BACKEND_URL=http://127.0.0.1:8000
 ```
 
 When opened outside Telegram on `localhost` or `127.0.0.1`, the app uses local debug mode so gameplay works without Telegram initData. Debug mode does not submit scores.
@@ -26,8 +26,9 @@ The production files are written to `webapp/dist/`.
 
 ## Telegram deployment
 - Deploy `webapp/dist/` to HTTPS static hosting.
+- Set Vercel `VITE_BACKEND_URL=https://tetris-project-ahgg.onrender.com` before building.
 - Set the deployed URL in the bot environment as `TELEGRAM_WEBAPP_URL`.
-- Add the frontend origin to backend `TETRIS_CORS_ORIGINS`.
+- Add the frontend origin to backend `TETRIS_CORS_ORIGINS`, for example `https://tetris-project-dun.vercel.app`.
 - The app authenticates by sending `Telegram.WebApp.initData` to `POST /telegram/auth`; the bot token stays only on the backend.
 
 ## Controls
