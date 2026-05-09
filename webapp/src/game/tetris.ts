@@ -38,7 +38,7 @@ const FALL_SPEED_BASE_MS = 1000;
 const FALL_SPEED_SCORE_STEP = 500;
 const FALL_SPEED_DECREASE_MS = 80;
 const FALL_SPEED_MIN_MS = 160;
-const HARD_DROP_SCORE_PER_ROW = 2;
+const HARD_DROP_SCORE_PER_ROW = 0;
 
 export const GAME_MODES: Array<{ value: GameMode; label: string; description: string }> = [
   { value: "peaceful", label: "Peaceful", description: "The 88 piece is disabled." },

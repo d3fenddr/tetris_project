@@ -82,16 +82,16 @@ export function GameCanvas({
 
   return (
     <section className="game-screen">
-      <button
-        className="game-pause-button"
-        data-control-button
-        onPointerDown={() => tap("pause")}
-        disabled={snapshot.status === "game_over"}
-        aria-label="Pause game"
-      >
-        <span aria-hidden="true">II</span>
-      </button>
       <header className="game-hud">
+        <button
+          className="game-pause-button"
+          data-control-button
+          onPointerDown={() => tap("pause")}
+          disabled={snapshot.status === "game_over"}
+          aria-label="Pause game"
+        >
+          <span aria-hidden="true">II</span>
+        </button>
         <div className="hud-card hud-main">
           <div className="hud-score-main">
             <span>Score</span>
@@ -101,7 +101,7 @@ export function GameCanvas({
             <span>Mode</span>
             <strong>{snapshot.mode}</strong>
             <small>Lv {snapshot.level}</small>
-            <small>Best: {bestText}</small>
+            <small className="hud-best">Best: {bestText}</small>
           </div>
         </div>
         <div className="hud-card next-preview-card">
