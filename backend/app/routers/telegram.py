@@ -223,14 +223,16 @@ def _chat_id_and_type(message: dict[str, Any]) -> tuple[int | None, str]:
     return chat_id, str(chat.get("type") or "")
 
 
-def _webapp_keyboard(is_group: bool = False) -> dict[str, Any] | None:
+def _webapp_keyboard(is_group: bool = False, chat_id: int | None = None) -> dict[str, Any] | None:
     webapp_url = settings.telegram_webapp_url
     if not webapp_url or "example.com" in webapp_url:
         logger.warning("Telegram WebApp URL is not configured for production.")
         return None
     button: dict[str, Any] = {"text": "Play Tetris"}
     if is_group:
-        button["url"] = webapp_url
+        # Groups/supergroups don't support web_app inline buttons; use a URL button.
+        url = f"{webapp_url}?tg_chat_id={chat_id}" if chat_id is not None else webapp_url
+        button["url"] = url
     else:
         button["web_app"] = {"url": webapp_url}
     return {
@@ -330,7 +332,7 @@ async def _handle_bot_command(
             text = "Open Tetris Mini App and compete with this group."
         else:
             text = "Welcome to Tetris. Open the Mini App to play."
-        await _send_message(chat_id, text, _webapp_keyboard(is_group))
+        await _send_message(chat_id, text, _webapp_keyboard(is_group, chat_id=chat_id))
         return
 
     if command == "leaderboard":

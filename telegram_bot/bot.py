@@ -35,7 +35,13 @@ async def _fetch_json(url: str) -> Any:
         return response.json()
 
 
-def _play_keyboard() -> InlineKeyboardMarkup:
+def _play_keyboard(chat_id: int | None = None, is_group: bool = False) -> InlineKeyboardMarkup:
+    if is_group and chat_id is not None:
+        # Groups/supergroups don't support web_app inline buttons; use a URL button instead.
+        url = f"{TELEGRAM_WEBAPP_URL}?tg_chat_id={chat_id}"
+        return InlineKeyboardMarkup(
+            [[InlineKeyboardButton(text="Play Tetris", url=url)]]
+        )
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(text="Play Tetris", web_app=WebAppInfo(url=TELEGRAM_WEBAPP_URL))]]
     )
@@ -87,13 +93,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if not await _command_is_for_this_bot(update, context):
         return
-    if _is_group_chat(update):
+    chat = update.effective_chat
+    is_group = _is_group_chat(update)
+    chat_id = chat.id if chat else None
+    if is_group:
         text = "Open Tetris Mini App and compete with this group."
     else:
         text = "Play Tetris Mini App."
     await update.message.reply_text(
         text,
-        reply_markup=_play_keyboard(),
+        reply_markup=_play_keyboard(chat_id=chat_id, is_group=is_group),
     )
 
 
@@ -102,8 +111,11 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if not await _command_is_for_this_bot(update, context):
         return
-    text = "Open Tetris Mini App and compete with this group." if _is_group_chat(update) else "Play Tetris Mini App."
-    await update.message.reply_text(text, reply_markup=_play_keyboard())
+    chat = update.effective_chat
+    is_group = _is_group_chat(update)
+    chat_id = chat.id if chat else None
+    text = "Open Tetris Mini App and compete with this group." if is_group else "Play Tetris Mini App."
+    await update.message.reply_text(text, reply_markup=_play_keyboard(chat_id=chat_id, is_group=is_group))
 
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

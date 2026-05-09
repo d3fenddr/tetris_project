@@ -8,6 +8,7 @@ type Props = {
   error: string;
   activeMode: LeaderboardMode;
   currentUserId?: number;
+  isGroupContext?: boolean;
   onModeChange: (mode: LeaderboardMode) => void;
   onBack?: () => void;
 };
@@ -33,7 +34,8 @@ function formatDate(value: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function emptyText(mode: LeaderboardMode): string {
+function emptyText(mode: LeaderboardMode, isGroup: boolean): string {
+  if (isGroup) return mode === "all" ? "No group scores yet." : `No group scores for ${MODE_LABELS[mode]} yet.`;
   if (mode === "all") return "Season 2 leaderboard is empty.";
   return `No scores for ${MODE_LABELS[mode]} yet.`;
 }
@@ -51,15 +53,19 @@ export function Leaderboard({
   error,
   activeMode,
   currentUserId,
+  isGroupContext = false,
   onModeChange,
   onBack,
 }: Props) {
+  const visibleTabs = isGroupContext ? TABS.filter((t) => t.value !== "all") : TABS;
+  const title = isGroupContext ? "Group Leaderboard" : "Season 2 Leaderboard";
+
   return (
     <section className={onBack ? "leaderboard-screen" : "leaderboard-panel"}>
       <div className="leaderboard-header">
-        <h2>Season 2 Leaderboard</h2>
+        <h2>{title}</h2>
         <div className="leaderboard-tabs" role="tablist" aria-label="Leaderboard mode">
-          {TABS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.value}
               className={`leaderboard-tab ${activeMode === tab.value ? "selected" : ""}`}
@@ -75,7 +81,7 @@ export function Leaderboard({
 
       {loading && <p className="muted">Loading scores...</p>}
       {error && <p className="error-text">{error}</p>}
-      {!loading && !error && rows.length === 0 && <p className="muted">{emptyText(activeMode)}</p>}
+      {!loading && !error && rows.length === 0 && <p className="muted">{emptyText(activeMode, isGroupContext)}</p>}
 
       <div className="leaderboard-list">
         {rows.map((row) => {

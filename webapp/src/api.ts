@@ -138,6 +138,19 @@ export async function fetchLeaderboard(mode: GameMode | "all" = "normal"): Promi
   return rows.map((row) => ({ ...row, nickname: cleanNickname(row.nickname) }));
 }
 
+export async function fetchGroupLeaderboard(
+  chatId: number,
+  mode: GameMode | "all" = "all",
+): Promise<LeaderboardItem[]> {
+  const queryMode = mode === "all" ? "all" : mode;
+  const rows = await requestJson<LeaderboardItem[]>(
+    `/scores/telegram/group/${chatId}?limit=20&mode=${encodeURIComponent(queryMode)}`,
+    {},
+    "Group leaderboard",
+  );
+  return rows.map((row) => ({ ...row, nickname: cleanNickname(row.nickname) }));
+}
+
 export async function submitScore(
   accessToken: string,
   payload: {
@@ -146,9 +159,10 @@ export async function submitScore(
     level: number;
     mode: GameMode;
     clientGameId: string;
+    telegramChatId?: number | null;
   },
 ): Promise<void> {
-  const body = {
+  const body: Record<string, unknown> = {
     score: payload.score,
     lines: payload.lines,
     level: payload.level,
@@ -157,6 +171,9 @@ export async function submitScore(
     platform: "telegram_web",
     client_game_id: payload.clientGameId,
   };
+  if (payload.telegramChatId != null) {
+    body.telegram_chat_id = payload.telegramChatId;
+  }
 
   const init: RequestInit = {
     method: "POST",

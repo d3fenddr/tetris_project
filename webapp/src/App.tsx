@@ -3,6 +3,7 @@ import {
   authenticateTelegram,
   ApiError,
   AuthSession,
+  fetchGroupLeaderboard,
   fetchLeaderboard,
   GameMode,
   LeaderboardItem,
@@ -78,13 +79,18 @@ export function App() {
     setLeaderboardLoading(true);
     setLeaderboardError("");
     try {
-      setLeaderboard(await fetchLeaderboard(selectedMode));
+      const groupChatId = telegram?.groupChatId ?? null;
+      if (groupChatId != null) {
+        setLeaderboard(await fetchGroupLeaderboard(groupChatId, selectedMode));
+      } else {
+        setLeaderboard(await fetchLeaderboard(selectedMode));
+      }
     } catch (error) {
       setLeaderboardError(error instanceof Error ? error.message : "Leaderboard is unavailable.");
     } finally {
       setLeaderboardLoading(false);
     }
-  }, []);
+  }, [telegram]);
 
   const openLeaderboard = useCallback((selectedMode: LeaderboardMode = "all") => {
     setLeaderboardMode(selectedMode);
@@ -105,9 +111,16 @@ export function App() {
     } else {
       setAuthStatus("Open from Telegram or login with an existing account.");
     }
-    refreshLeaderboard("all");
     return unbindViewport;
-  }, [refreshLeaderboard]);
+  }, []);
+
+  // Load leaderboard once telegram context is ready.
+  useEffect(() => {
+    if (telegram !== null) {
+      const initialMode: LeaderboardMode = telegram.groupChatId != null ? "normal" : "all";
+      refreshLeaderboard(initialMode);
+    }
+  }, [telegram, refreshLeaderboard]);
 
   useEffect(() => {
     menuAudioRef.current = new Audio(MENU_MUSIC);
@@ -231,6 +244,7 @@ export function App() {
       level: snapshot.level,
       mode: snapshot.mode,
       clientGameId: gameId,
+      telegramChatId: telegram?.groupChatId ?? null,
     })
       .then(() => {
         setSaveStatus("Score saved.");
@@ -315,6 +329,7 @@ export function App() {
           error={leaderboardError}
           activeMode={leaderboardMode}
           currentUserId={session?.user.id}
+          isGroupContext={telegram?.groupChatId != null}
           onModeChange={(selectedMode) => {
             setLeaderboardMode(selectedMode);
             refreshLeaderboard(selectedMode);

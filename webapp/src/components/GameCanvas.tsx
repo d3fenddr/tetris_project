@@ -100,7 +100,7 @@ export function GameCanvas({
           <div className="hud-meta">
             <span>Mode</span>
             <strong>{snapshot.mode}</strong>
-            <small>Level {snapshot.level}</small>
+            <small>Lv {snapshot.level}</small>
             <small>Best: {bestText}</small>
           </div>
         </div>

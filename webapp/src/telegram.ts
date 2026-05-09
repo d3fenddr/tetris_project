@@ -7,7 +7,7 @@ type TelegramUser = {
 
 type TelegramWebApp = {
   initData: string;
-  initDataUnsafe?: { user?: TelegramUser };
+  initDataUnsafe?: { user?: TelegramUser; chat?: { id: number; type?: string } };
   colorScheme?: "light" | "dark";
   themeParams?: Record<string, string>;
   viewportHeight?: number;
@@ -30,7 +30,34 @@ export type TelegramContext = {
   initData: string;
   user: TelegramUser | null;
   theme: Record<string, string>;
+  /** Telegram group/supergroup chat id when launched from a group context. */
+  groupChatId: number | null;
 };
+
+/**
+ * Detect group chat id from multiple sources:
+ * 1. Telegram initDataUnsafe.chat (when Telegram provides it)
+ * 2. URL query parameter `tg_chat_id` (set by bot URL button in groups)
+ */
+function detectGroupChatId(webApp: TelegramWebApp | undefined): number | null {
+  // Source 1: Telegram initDataUnsafe chat object
+  const chat = webApp?.initDataUnsafe?.chat;
+  if (chat && typeof chat.id === "number" && (chat.type === "group" || chat.type === "supergroup")) {
+    return chat.id;
+  }
+
+  // Source 2: URL query parameter (used when bot sends URL button in groups)
+  const params = new URLSearchParams(window.location.search);
+  const rawChatId = params.get("tg_chat_id");
+  if (rawChatId) {
+    const parsed = Number(rawChatId);
+    if (Number.isFinite(parsed) && parsed !== 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
 
 export function initTelegram(): TelegramContext {
   const webApp = window.Telegram?.WebApp;
@@ -50,6 +77,7 @@ export function initTelegram(): TelegramContext {
     initData: webApp?.initData ?? "",
     user: webApp?.initDataUnsafe?.user ?? null,
     theme: webApp?.themeParams ?? {},
+    groupChatId: detectGroupChatId(webApp),
   };
 }
 
