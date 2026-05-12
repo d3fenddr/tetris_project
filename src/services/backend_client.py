@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import requests
@@ -89,18 +89,24 @@ class BackendClient:
         self.timeout_seconds = timeout_seconds
         self.session = requests.Session()
         self.access_token: Optional[str] = None
+        self._token_refresh_callback: Optional[Callable[[], Tuple[str, str]]] = None
         if DEBUG_ONLINE_SCORE_FLOW:
             print(f"[score-flow] Backend URL: {self.base_url}")
 
     def set_access_token(self, access_token: Optional[str]) -> None:
         self.access_token = access_token or None
 
+    def set_token_refresh_callback(
+        self, callback: Optional[Callable[[], Tuple[str, str]]]
+    ) -> None:
+        self._token_refresh_callback = callback
+
     def _headers(self) -> Dict[str, str]:
         if not self.access_token:
             return {}
         return {"Authorization": f"Bearer {self.access_token}"}
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _request(self, method: str, path: str, _allow_token_refresh: bool = True, **kwargs: Any) -> Any:
         should_log = DEBUG_ONLINE_SCORE_FLOW and (
             path.startswith("/scores")
             or path.startswith("/auth/me")
@@ -152,6 +158,20 @@ class BackendClient:
 
         if should_log:
             print(f"[score-flow] {method} {path} -> HTTP {response.status_code}, timeout={timeout}s")
+
+        if response.status_code == 401 and _allow_token_refresh and self._token_refresh_callback:
+            if should_log:
+                print(f"[score-flow] {method} {path} HTTP 401, attempting token refresh")
+            try:
+                new_access, _new_refresh = self._token_refresh_callback()
+            except Exception:
+                new_access = None
+            if new_access:
+                if should_log:
+                    print(f"[score-flow] {method} {path} token refresh succeeded, retrying request")
+                return self._request(method, path, _allow_token_refresh=False, **kwargs)
+            if should_log:
+                print(f"[score-flow] {method} {path} token refresh failed, propagating 401")
 
         if response.status_code >= 400:
             try:
@@ -226,6 +246,17 @@ class BackendClient:
             created=bool(data.get("created", default_created)),
             user=user,
         )
+        return auth
+
+    def refresh_session(self, refresh_token: str) -> BackendAuth:
+        data = self._request(
+            "POST",
+            "/auth/refresh",
+            _allow_token_refresh=False,
+            json={"refresh_token": refresh_token},
+        )
+        auth = self._auth_from_response(data, default_created=False)
+        self.set_access_token(auth.access_token)
         return auth
 
     def logout(self, refresh_token: str) -> None:

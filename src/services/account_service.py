@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 from src.state import AccountSession
 from src.services.session_service import SessionService
@@ -25,6 +25,10 @@ class AccountService:
             return None
         account = AccountSession.from_dict(raw)
         self.backend_client.set_access_token(account.access_token)
+        if account.refresh_token:
+            self.backend_client.set_token_refresh_callback(self._do_token_refresh)
+        else:
+            self.backend_client.set_token_refresh_callback(None)
         return account
 
     def save_account(self, account: AccountSession) -> None:
@@ -32,8 +36,26 @@ class AccountService:
         data["account"] = account.to_dict()
         self.session_service.save(data)
         self.backend_client.set_access_token(account.access_token)
+        if account.refresh_token:
+            self.backend_client.set_token_refresh_callback(self._do_token_refresh)
+        else:
+            self.backend_client.set_token_refresh_callback(None)
         if DEBUG_ONLINE_SCORE_FLOW:
             print("[score-flow] Account session save completed.")
+
+    def _do_token_refresh(self) -> Tuple[str, str]:
+        account = self.load_account()
+        if not account or not account.refresh_token:
+            raise BackendClientError("No refresh token available.", error_type="auth")
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print("[score-flow] Attempting token refresh via /auth/refresh")
+        auth = self.backend_client.refresh_session(account.refresh_token)
+        account.access_token = auth.access_token
+        account.refresh_token = auth.refresh_token
+        self.save_account(account)
+        if DEBUG_ONLINE_SCORE_FLOW:
+            print("[score-flow] Token refresh succeeded, session updated")
+        return auth.access_token, auth.refresh_token
 
     def _account_from_auth(self, nickname: str, auth: BackendAuth) -> AccountSession:
         user = auth.user or self.backend_client.get_current_user()
@@ -127,3 +149,4 @@ class AccountService:
         data["account"] = None
         self.session_service.save(data)
         self.backend_client.set_access_token(None)
+        self.backend_client.set_token_refresh_callback(None)
