@@ -21,6 +21,7 @@ from backend.app.schemas import (
     LoginRequest,
     LogoutRequest,
     NicknameChangeResponse,
+    RefreshTokenRequest,
     RegisterRequest,
     TokenPairResponse,
     UserResponse,
@@ -93,6 +94,13 @@ def _auth_response_for_user(db: Session, user: User, created: bool = False) -> A
     )
 
 
+def _invalid_refresh_token() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired refresh token.",
+    )
+
+
 @router.post("/register", response_model=AuthResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
     def operation() -> AuthResponse:
@@ -133,6 +141,33 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
         return _auth_response_for_user(db, user, created=False)
 
     return run_db_operation_with_retry(db, "auth/login", operation)
+
+
+@router.post("/refresh", response_model=TokenPairResponse)
+def refresh(payload: RefreshTokenRequest, db: Session = Depends(get_db)) -> TokenPairResponse:
+    def operation() -> TokenPairResponse:
+        now = datetime.utcnow()
+        token_hash = hash_refresh_token(payload.refresh_token)
+        refresh_session = (
+            db.query(RefreshSession)
+            .filter(RefreshSession.refresh_token_hash == token_hash)
+            .first()
+        )
+        if (
+            refresh_session is None
+            or refresh_session.revoked_at is not None
+            or refresh_session.expires_at <= now
+            or refresh_session.user is None
+        ):
+            raise _invalid_refresh_token()
+
+        refresh_session.last_used_at = now
+        refresh_session.revoked_at = now
+        tokens = _token_pair_for_user(db, refresh_session.user)
+        db.commit()
+        return tokens
+
+    return run_db_operation_with_retry(db, "auth/refresh", operation)
 
 
 @router.post("/enter", response_model=EnterResponse)
